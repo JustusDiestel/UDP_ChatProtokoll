@@ -1,0 +1,88 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IntelliJ IDEA ###
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/libraries/
+*.iws
+*.iml
+*.ipr
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+
+# ---- Betriebssystemabhängiges ----
+.DS_Store
+Thumbs.db
+
+# ---- Editor / IDE ----
+# IntelliJ
+.idea/
+*.iml
+out/
+
+# VSCode
+.vscode/
+
+# Eclipse (falls jemand im Team es nutzt)
+.project
+.classpath
+.settings/
+
+# ---- Java / Build-Artefakte ----
+target/
+bin/
+build/
+dist/
+
+# ---- Maven ----
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# ---- Gradle ----
+.gradle/
+gradle-app.setting
+**/build/
+
+# ---- Logs ----
+*.log
+
+# ---- Temporary Files ----
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# ---- Dependency Caches ----
+*.jar
+*.war
+*.ear
+
+# ---- Test Output ----
+test-output/
