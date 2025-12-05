@@ -1,62 +1,96 @@
 package net.p2pchat;
 
 import net.p2pchat.model.Packet;
+import net.p2pchat.model.PacketHeader;
 import net.p2pchat.network.UdpSocket;
-import net.p2pchat.protocol.PacketFactory;
-import net.p2pchat.routing.HeartbeatMonitor;
-import net.p2pchat.routing.HeartbeatSender;
+import net.p2pchat.util.IpUtil;
 
 import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.Scanner;
 
 public class Main {
 
     public static void main(String[] args) throws Exception {
 
-        int port = 5000;  // Port deines Knotens
+        if (args.length < 1) {
+            System.out.println("Usage: java net.p2pchat.Main <localPort>");
+            return;
+        }
 
-        // ----------------------------
-        // Node starten
-        // ----------------------------
+        int localPort = Integer.parseInt(args[0]);
 
-        NodeContext.socket = new UdpSocket(port);
+        // Socket + NodeContext initialisieren
+        NodeContext.socket = new UdpSocket(localPort);
         NodeContext.socket.startReceiver();
         NodeContext.socket.startRetransmissionLoop();
 
-        HeartbeatSender.start();
-        HeartbeatMonitor.start();
+        String localIpStr = IpUtil.intToIp(NodeContext.localIp);
+        System.out.println("Node gestartet auf " + localIpStr + ":" + localPort);
+        System.out.println("Befehle:");
+        System.out.println("  msg <ip> <port> <text>");
+        System.out.println("  quit");
+        System.out.println();
 
-        System.out.println("Node gestartet auf Port " + port);
-        System.out.println("Lokale IP (int): " + NodeContext.localIp);
+        Scanner scanner = new Scanner(System.in);
 
-        // ----------------------------
-        // HELLO als Startsignal senden
-        // (wird an dich selbst geschickt)
-        // ----------------------------
+        while (true) {
+            System.out.print("> ");
+            if (!scanner.hasNextLine()) {
+                break;
+            }
+            String line = scanner.nextLine().trim();
+            if (line.isEmpty()) {
+                continue;
+            }
 
-        int seq = NodeContext.seqGen.next();
+            if (line.equalsIgnoreCase("quit") || line.equalsIgnoreCase("exit")) {
+                break;
+            }
 
-        Packet hello = PacketFactory.createHello(
-                seq,
-                NodeContext.localIp,   // sourceIp
-                NodeContext.localIp    // destIp (self-test)
-        );
+            // Nachricht senden: msg <ip> <port> <text...>
+            if (line.startsWith("msg ")) {
+                String[] parts = line.split(" ", 4);
+                if (parts.length < 4) {
+                    System.out.println("Syntax: msg <ip> <port> <text>");
+                    continue;
+                }
 
-        NodeContext.socket.sendPacket(
-                hello,
-                InetAddress.getByName("127.0.0.1"),
-                port
-        );
+                String destIpStr = parts[1];
+                int destPort;
+                try {
+                    destPort = Integer.parseInt(parts[2]);
+                } catch (NumberFormatException e) {
+                    System.out.println("Ungültiger Port.");
+                    continue;
+                }
+                String text = parts[3];
 
-        System.out.println("HELLO gesendet (seq=" + seq + ")");
+                byte[] payload = text.getBytes(StandardCharsets.UTF_8);
 
-        // ----------------------------
-        // Node läuft dauerhaft
-        // ----------------------------
+                PacketHeader header = new PacketHeader();
+                header.type = 0x05; // MSG
+                header.sequenceNumber = NodeContext.seqGen.next();
+                header.sourceIp = NodeContext.localIp;
+                // bei lokalen Tests: alle Knoten teilen sich dieselbe IP (127.0.0.1 / deine LAN-IP)
+                header.destinationIp = NodeContext.localIp;
+                header.payloadLength = payload.length;
+                header.ttl = 10;
+                header.computeChecksum(payload);
 
-        System.out.println("Node läuft. Drücke Enter zum Beenden.");
-        new java.util.Scanner(System.in).nextLine();
+                Packet p = new Packet(header, payload);
 
-        System.out.println("Beende...");
+                // zuverlässig senden (du brauchst in UdpSocket: sendReliable(Packet, String, int))
+                NodeContext.socket.sendReliable(p, destIpStr, destPort);
+
+                System.out.println("MSG gesendet an " + destIpStr + ":" + destPort);
+                continue;
+            }
+
+            System.out.println("Unbekannter Befehl.");
+        }
+
+        System.out.println("Beende Node...");
         NodeContext.socket.stop();
     }
 }
