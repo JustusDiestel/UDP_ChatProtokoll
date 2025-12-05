@@ -3,36 +3,39 @@ package net.p2pchat;
 import net.p2pchat.model.Packet;
 import net.p2pchat.model.PacketHeader;
 import net.p2pchat.network.UdpSocket;
+import net.p2pchat.util.SequenceNumberGenerator;
 
 public class Main {
-    public static void main(String[] args) {
-        int port = 5000;
+    private static final SequenceNumberGenerator SEQ = new SequenceNumberGenerator();
 
-        System.out.println("Starte P2P-Chat-Knoten auf Port " + port);
+    public static void main(String[] args) throws Exception {
+        int port = 5000;
 
         UdpSocket socket = new UdpSocket(port);
         socket.startReceiver();
 
-        System.out.println("Knoten läuft. Wartet auf UDP-Pakete...");
-
-        String msg = "HELLO_FROM_JUSTUS";
+        // Beispiel-Payload
+        String msg = "TEST_DUP_CHECK";
         byte[] payload = msg.getBytes();
 
         PacketHeader header = new PacketHeader();
-        header.type = 0x03; // HELLO
-        header.sequenceNumber = 1;
-        header.sourceIp = 0; // setzen wir später dynamisch
-        header.destinationIp = 0; // HELLO ist broadcast
+        header.type = 0x05; // MSG
+        header.sequenceNumber = SEQ.next();
+        header.sourceIp = 123;       // später: echte lokale IP als int
+        header.destinationIp = 0;    // z.B. 0 bei Test
         header.payloadLength = payload.length;
         header.ttl = 10;
-
         header.computeChecksum(payload);
 
-        Packet packet = new Packet(header, payload);
+        Packet p = new Packet(header, payload);
 
-        socket.send(packet.toBytes(), "127.0.0.1", 5000);
+        // zweimal senden mit der gleichen seq -> zweites Paket sollte als Duplikat erkannt werden
+        socket.send(p.toBytes(), "127.0.0.1", port);
+        socket.send(p.toBytes(), "127.0.0.1", port);
 
-        System.out.println("Testpaket gesendet.");
+        System.out.println("Zwei Pakete mit gleicher SequenceNumber gesendet.");
+
+        System.out.println("Knoten läuft. Enter zum Beenden.");
         new java.util.Scanner(System.in).nextLine();
     }
 }
