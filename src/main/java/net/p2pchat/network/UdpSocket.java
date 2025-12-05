@@ -3,6 +3,7 @@ package net.p2pchat.network;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.SocketException;
 
 public class UdpSocket {
@@ -51,4 +52,16 @@ public class UdpSocket {
         running = false;
         socket.close();
     }
+
+    public void send(byte[] data, String ip, int port) {
+        try {
+            DatagramPacket packet =
+                    new DatagramPacket(data, data.length, InetAddress.getByName(ip), port);
+
+            socket.send(packet);
+        } catch (Exception e) {
+            System.err.println("Sendefehler: " + e.getMessage());
+        }
+    }
+
 }
