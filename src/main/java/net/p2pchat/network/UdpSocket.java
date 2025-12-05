@@ -1,10 +1,11 @@
 package net.p2pchat.network;
 
+import net.p2pchat.model.Packet;
+import net.p2pchat.protocol.PendingPackets;
+import net.p2pchat.util.IpUtil;
+
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketException;
+import java.net.*;
 
 public class UdpSocket {
 
@@ -48,17 +49,68 @@ public class UdpSocket {
         receiverThread.start();
     }
 
+
+    public void startRetransmissionLoop() {
+        Thread t = new Thread(() -> {
+            while (true) {
+                long now = System.currentTimeMillis();
+
+                for (var entry : PendingPackets.getPending().entrySet()) {
+                    int seq = entry.getKey();
+                    var pending = entry.getValue();
+
+                    if (now - pending.timestamp > 3000) {
+
+                        if (pending.attempts >= 3) {
+                            System.out.println("Gebe Paket seq=" + seq + " auf.");
+                            PendingPackets.clear(seq);
+                            continue;
+                        }
+
+                        System.out.println("Retransmission seq=" + seq +
+                                " (Versuch " + pending.attempts + ")");
+
+                        try {
+                            this.sendPacket(pending.packet, InetAddress.getByName(pending.ip), pending.port);
+                        } catch (UnknownHostException e) {
+                            throw new RuntimeException(e);
+                        }
+
+                        pending.attempts++;
+                        pending.timestamp = now;
+                    }
+                }
+
+                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+            }
+        });
+
+        t.setDaemon(true);
+        t.start();
+    }
+
     public void stop() {
         running = false;
         socket.close();
     }
 
-    public void send(byte[] data, String ip, int port) {
-        try {
-            DatagramPacket packet =
-                    new DatagramPacket(data, data.length, InetAddress.getByName(ip), port);
+    // In UdpSocket.java
+    public void sendPacket(Packet p, InetAddress addr, int port) {
+        byte[] data = p.toBytes();
 
-            socket.send(packet);
+        try {
+            DatagramPacket dp = new DatagramPacket(data, data.length, addr, port);
+            socket.send(dp);
+        } catch (Exception e) {
+            System.err.println("Sendefehler: " + e.getMessage());
+        }
+    }
+
+    public void sendReliable(Packet p, String ip, int port) {
+        try {
+            InetAddress addr = InetAddress.getByName(ip);
+            sendPacket(p, addr, port);
+            PendingPackets.track(p, ip, port);   // <- wichtig
         } catch (Exception e) {
             System.err.println("Sendefehler: " + e.getMessage());
         }

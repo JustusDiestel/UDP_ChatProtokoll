@@ -1,11 +1,17 @@
 package net.p2pchat.network;
 
+import net.p2pchat.NodeContext;
+import net.p2pchat.model.Packet;
 import net.p2pchat.model.PacketHeader;
+import net.p2pchat.protocol.PacketFactory;
+import net.p2pchat.protocol.PendingPackets;
 import net.p2pchat.util.HashUtil;
 import net.p2pchat.util.ReceivedHistory;
 
 import java.net.DatagramPacket;
 import java.util.Arrays;
+
+import static net.p2pchat.NodeContext.localIp;
 
 public class PacketReceiver {
 
@@ -45,6 +51,27 @@ public class PacketReceiver {
 
         if (!valid) {
             System.out.println("Ungültige Checksumme -> Paket verwerfen.");
+            return;
+        }
+
+        if(header.type == 0x05){
+            System.out.println("MSG empfangen, sende ACK zurück");
+            Packet ack = PacketFactory.createAck(
+                    header.sequenceNumber,
+                    localIp,            // dein eigener Knoten
+                    header.sourceIp     // Ziel = Absender
+            );
+
+            NodeContext.socket.sendPacket(
+                    ack,
+                    packet.getAddress(),
+                    packet.getPort()
+            );
+        }
+
+        if (header.type == 0x01) { // ACK
+            System.out.println("ACK für seq=" + header.sequenceNumber + " empfangen.");
+            PendingPackets.clear(header.sequenceNumber);
             return;
         }
     }
