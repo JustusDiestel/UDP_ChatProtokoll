@@ -11,9 +11,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class FileResender {
 
-    // Speichert gesendete Chunks: key=(destIp), value = map(chunkId -> data)
-    // Bei Bedarf kannst du später ein echtes File-ID Konzept einbauen.
     private static final Map<Integer, Map<Integer, byte[]>> sentFiles = new ConcurrentHashMap<>();
+    private static final Map<Integer, Integer> chunkCounts = new ConcurrentHashMap<>();
+
+    public static void registerFile(int destIp, int totalChunks) {
+        chunkCounts.put(destIp, totalChunks);
+        sentFiles.putIfAbsent(destIp, new ConcurrentHashMap<>());
+    }
 
     public static void registerChunk(int destIp, int chunkId, byte[] data) {
         sentFiles.putIfAbsent(destIp, new ConcurrentHashMap<>());
@@ -21,50 +25,44 @@ public class FileResender {
     }
 
     public static void resendChunk(int destIp, int destPort, int chunkId) {
-
-        if (!sentFiles.containsKey(destIp)) {
-            System.out.println("Resend-Error: Keine Datei für diesen Empfänger registriert.");
+        Map<Integer, byte[]> chunks = sentFiles.get(destIp);
+        if (chunks == null) {
+            System.out.println("Resend: keine Chunks für destIp bekannt.");
             return;
         }
 
-        byte[] chunk = sentFiles.get(destIp).get(chunkId);
-
+        byte[] chunk = chunks.get(chunkId);
         if (chunk == null) {
-            System.out.println("Resend-Error: Chunk nicht bekannt.");
+            System.out.println("Resend: Chunk " + chunkId + " nicht bekannt.");
             return;
         }
 
-        // Neue SequenceNumber für Resend
-        int seq = NodeContext.seqGen.next();
+        int totalChunks = chunkCounts.getOrDefault(destIp, -1);
+        if (totalChunks <= 0) {
+            System.out.println("Resend: unknown totalChunks.");
+            return;
+        }
 
-        // ChunkCount unbekannt? Nein: ChunkCount muss beim Senden bekannt sein.
-        // Wir speichern chunkCount also im FileSender ab (siehe unten).
-        int chunkCount = FileSender.getChunkCount(destIp);
+        int seq = NodeContext.seqGen.next();
 
         Packet p = PacketFactory.createFileChunk(
                 seq,
                 NodeContext.localIp,
                 destIp,
                 chunkId,
-                chunkCount,
+                totalChunks,
                 chunk
         );
 
-        // Routing benutzen
         var route = RoutingManager.getRoute(destIp, destPort);
         if (route == null) {
-            System.out.println("Resend-Error: Keine Route verfügbar.");
+            System.out.println("Resend: keine Route.");
             return;
         }
 
         String nextHop = IpUtil.intToIp(route.nextHopIp);
+        NodeContext.socket.sendReliable(p, nextHop, route.nextHopPort);
 
-        NodeContext.socket.sendReliable(
-                p,
-                nextHop,
-                route.nextHopPort
-        );
-
-        System.out.println("Fehlender Chunk " + chunkId + " erneut gesendet → " + nextHop);
+        System.out.println("Chunk " + chunkId + " erneut gesendet → " + nextHop + ":" + route.nextHopPort);
     }
 }

@@ -116,4 +116,13 @@ public class UdpSocket {
         }
     }
 
+    public InetAddress socketAddressForIp(int ip) {
+        try {
+            String ipStr = IpUtil.intToIp(ip);
+            return InetAddress.getByName(ipStr);
+        } catch (Exception e) {
+            throw new RuntimeException("Konnte InetAddress für IP " + ip + " nicht erstellen", e);
+        }
+    }
+
 }

@@ -2,6 +2,7 @@ package net.p2pchat.network;
 
 import net.p2pchat.NodeContext;
 import net.p2pchat.file.ChunkAssembler;
+import net.p2pchat.file.FileResender;
 import net.p2pchat.model.Packet;
 import net.p2pchat.model.PacketHeader;
 import net.p2pchat.protocol.PacketFactory;
@@ -26,33 +27,25 @@ public class PacketReceiver {
         int len = packet.getLength();
         byte[] raw = Arrays.copyOfRange(packet.getData(), packet.getOffset(), packet.getOffset() + len);
         PacketHeader header = PacketHeader.fromBytes(raw);
+
         NeighborManager.updateOrAdd(header.sourceIp, packet.getPort());
 
-
-
-
-        if (header.type == 0x01) { // ACK
+        if (header.type == 0x01) {
             System.out.println("ACK für seq=" + header.sequenceNumber + " empfangen.");
             PendingPackets.clear(header.sequenceNumber);
             return;
         }
 
         boolean duplicate = receivedHistory.isDuplicate(header.sourceIp, header.sequenceNumber);
-
         if (duplicate) {
-            System.out.println("Duplikat: seq=" + header.sequenceNumber + " → sende ACK erneut.");
+            System.out.println("Duplikat seq=" + header.sequenceNumber + " → sende ACK erneut.");
 
-            var ack = PacketFactory.createAck(
+            Packet ack = PacketFactory.createAck(
                     header.sequenceNumber,
                     NodeContext.localIp,
                     header.sourceIp
             );
-
-            NodeContext.socket.sendPacket(
-                    ack,
-                    packet.getAddress(),
-                    packet.getPort()
-            );
+            NodeContext.socket.sendPacket(ack, packet.getAddress(), packet.getPort());
             return;
         }
 
@@ -224,34 +217,32 @@ public class PacketReceiver {
             return;
         }
 
-        if (header.type == 0x06) {
-            System.out.println("FILE_CHUNK empfangen.");
-
-            ChunkAssembler.receiveChunk(header, payload);
-
-            return;
-        }
-
-        // NO_ACK (Type 0x02)
+        // NO_ACK (Type 0x02) – zuerst behandeln, bevor FILE_CHUNK
         if (header.type == 0x02) {
-            System.out.println("NO_ACK empfangen von " + header.sourceIp);
+            if (payload.length < 4) {
+                System.out.println("NO_ACK Payload zu kurz.");
+                return;
+            }
 
-            // 4 Bytes missing chunk id
             int missingChunkId =
                     ((payload[0] & 0xFF) << 24) |
                             ((payload[1] & 0xFF) << 16) |
-                            ((payload[2] & 0xFF) << 8) |
+                            ((payload[2] & 0xFF) << 8)  |
                             (payload[3] & 0xFF);
 
-            System.out.println("Fehlender Chunk: " + missingChunkId);
+            System.out.println("NO_ACK empfangen – fehlender Chunk: " + missingChunkId);
 
-            // -> fehlenden Chunk erneut senden
             FileResender.resendChunk(
-                    header.sourceIp,
+                    header.sourceIp,     // Empfänger der Datei ist der NO_ACK-Sender
                     packet.getPort(),
                     missingChunkId
             );
+            return;
+        }
 
+        // FILE_CHUNK (Type 0x06)
+        if (header.type == 0x06) {
+            ChunkAssembler.receiveChunk(header, payload, packet.getPort());
             return;
         }
     }
