@@ -11,22 +11,22 @@ public class PendingPackets {
         public Packet packet;
         public long timestamp;
         public int attempts;
-        public String ip;
-        public int port;
+        public int destIp;
+        public int destPort;
 
-        public Pending(Packet p, String ip, int port) {
+        public Pending(Packet p, int destIp, int destPort) {
             this.packet = p;
             this.timestamp = System.currentTimeMillis();
             this.attempts = 1;
-            this.ip = ip;
-            this.port = port;
+            this.destIp = destIp;
+            this.destPort = destPort;
         }
     }
 
     private static final Map<Integer, Pending> pending = new ConcurrentHashMap<>();
 
-    public static void track(Packet p, String ip, int port) {
-        pending.put(p.header.sequenceNumber, new Pending(p, ip, port));
+    public static void track(Packet p, int destIp, int destPort) {
+        pending.put(p.header.sequenceNumber, new Pending(p, destIp, destPort));
     }
 
     public static void clear(int seq) {

@@ -1,37 +1,35 @@
 package net.p2pchat.routing;
 
+import net.p2pchat.NodeContext;
+
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
 public class RoutingUpdateUtil {
 
-    /**
-     * Baut den Payload für ein ROUTING_UPDATE (Type 0x08)
-     * Format laut Spezifikation:
-     *
-     * 2 Bytes: EntryCount
-     * Für jeden Eintrag:
-     *   4 Bytes destIp
-     *   2 Bytes destPort
-     *   1 Byte distance
-     */
     public static byte[] buildPayloadFromRoutingTable() {
 
-        Collection<Route> routes = RoutingTable.getAll().values();
+        Collection<Route> all = RoutingTable.getAll().values();
+        List<Route> filtered = new ArrayList<>();
 
-        int entryCount = routes.size();
+        for (Route r : all) {
+            if (r.destIp == NodeContext.localIp && r.destPort == NodeContext.localPort) continue;
+            filtered.add(r);
+        }
+
+        int entryCount = filtered.size();
         int payloadSize = 2 + entryCount * 7;
 
         ByteBuffer buf = ByteBuffer.allocate(payloadSize);
 
-        // Anzahl Einträge (unsigned short)
         buf.putShort((short) entryCount);
 
-        // 7-Byte Routing-Entries
-        for (Route r : routes) {
-            buf.putInt(r.destIp);                    // 4 Byte
-            buf.putShort((short) r.destPort);        // 2 Byte
-            buf.put((byte) r.distance);              // 1 Byte
+        for (Route r : filtered) {
+            buf.putInt(r.destIp);
+            buf.putShort((short) r.destPort);
+            buf.put((byte) r.distance);
         }
 
         return buf.array();

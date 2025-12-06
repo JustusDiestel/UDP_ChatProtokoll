@@ -16,6 +16,7 @@ import net.p2pchat.util.ReceivedHistory;
 
 import java.net.DatagramPacket;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 public class PacketReceiver {
@@ -28,31 +29,13 @@ public class PacketReceiver {
         byte[] raw = Arrays.copyOfRange(packet.getData(), packet.getOffset(), packet.getOffset() + len);
         PacketHeader header = PacketHeader.fromBytes(raw);
 
-        NeighborManager.updateOrAdd(header.sourceIp, packet.getPort());
+        NeighborManager.updateOrAdd(header.sourceIp, header.sourcePort & 0xFFFF);
 
         if (header.type == 0x01) {
             System.out.println("ACK für seq=" + header.sequenceNumber + " empfangen.");
             PendingPackets.clear(header.sequenceNumber);
             return;
         }
-
-        boolean duplicate = receivedHistory.isDuplicate(header.sourceIp, header.sequenceNumber);
-        if (duplicate) {
-            System.out.println("Duplikat seq=" + header.sequenceNumber + " → sende ACK erneut.");
-
-            Packet ack = PacketFactory.createAck(
-                    header.sequenceNumber,
-                    NodeContext.localIp,
-                    header.sourceIp
-            );
-            NodeContext.socket.sendPacket(ack, packet.getAddress(), packet.getPort());
-            return;
-        }
-
-        System.out.println("Neues Paket: type=" + header.type +
-                ", seq=" + header.sequenceNumber +
-                ", len=" + header.payloadLength);
-
 
         int headerSize = PacketHeader.HEADER_SIZE;
         if (raw.length < headerSize + header.payloadLength) {
@@ -65,24 +48,21 @@ public class PacketReceiver {
         byte[] calc = HashUtil.sha256(payload);
         boolean valid = Arrays.equals(calc, header.checksum);
 
-        System.out.println("Checksum valid: " + valid);
+        System.out.println("Neues Paket: type=" + header.type +
+                ", seq=" + header.sequenceNumber +
+                ", len=" + header.payloadLength +
+                ", checksumValid=" + valid);
 
-        if (!valid) {
-            System.out.println("Ungültige Checksumme -> Paket verwerfen.");
-            return;
-        }
+        if (!valid) return;
 
-        // ROUTING_UPDATE
         if (header.type == 0x08) {
-            System.out.println("ROUTING_UPDATE empfangen von " + header.sourceIp + ":" + packet.getPort());
-
             ByteBuffer buf = ByteBuffer.wrap(payload);
 
-            int entryCount = buf.getShort() & 0xFFFF; // unsigned
+            int entryCount = buf.getShort() & 0xFFFF;
             boolean tableChanged = false;
 
             int nextHopIp = header.sourceIp;
-            int nextHopPort = packet.getPort();
+            int nextHopPort = header.sourcePort & 0xFFFF;
 
             for (int i = 0; i < entryCount; i++) {
                 int destIp = buf.getInt();
@@ -111,45 +91,111 @@ public class PacketReceiver {
                 if (existing.nextHopIp == nextHopIp && existing.nextHopPort == nextHopPort) {
                     existing.distance = newDistance;
                     tableChanged = true;
-                    continue;
                 }
             }
 
             if (tableChanged) {
                 System.out.println("Routing-Tabelle aktualisiert durch Update von " +
-                        header.sourceIp + ":" + packet.getPort());
-                // TODO: optional weiteres ROUTING_UPDATE an Nachbarn triggern
+                        IpUtil.intToIp(header.sourceIp) + ":" + (header.sourcePort & 0xFFFF));
             }
 
             return;
         }
 
-        // MSG
+        if (header.type == 0x03) {
+
+            int srcIp = header.sourceIp;
+            int srcPort = header.sourcePort & 0xFFFF;
+
+            Route direct = RoutingTable.getRoute(srcIp, srcPort);
+            boolean isNewNeighbor = (direct == null || direct.distance > 1);
+
+            Route r = new Route(
+                    srcIp,
+                    srcPort,
+                    srcIp,
+                    srcPort,
+                    1
+            );
+            RoutingTable.addOrUpdate(r);
+            NeighborManager.updateOrAdd(srcIp, srcPort);
+
+            if (isNewNeighbor) {
+                var reply = PacketFactory.createHello(
+                        NodeContext.seqGen.next(),
+                        srcIp,
+                        srcPort
+                );
+
+                NodeContext.socket.sendPacket(
+                        reply,
+                        packet.getAddress(),
+                        srcPort
+                );
+            }
+
+            return;
+        }
+
+        if (header.type == 0x04) {
+            NeighborManager.markDead(header.sourceIp, header.sourcePort & 0xFFFF);
+            RoutingTable.removeVia(header.sourceIp, header.sourcePort & 0xFFFF);
+            return;
+        }
+
+        if (header.type == 0x07) {
+            return;
+        }
+
+        if (header.type == 0x02) {
+            if (payload.length < 2) return;
+
+            ByteBuffer buf = ByteBuffer.wrap(payload);
+            int count = buf.getShort() & 0xFFFF;
+
+            if (payload.length < 2 + count * 4) return;
+
+            int[] missing = new int[count];
+            for (int i = 0; i < count; i++) {
+                missing[i] = buf.getInt();
+            }
+
+            FileResender.resendChunks(
+                    header.sourceIp,
+                    header.sourcePort & 0xFFFF,
+                    missing
+            );
+            return;
+        }
+
+        if (header.type == 0x05 || header.type == 0x06) {
+            boolean duplicate = receivedHistory.isDuplicate(header.sourceIp, header.sequenceNumber);
+            if (duplicate) {
+                if (header.type == 0x05) {
+                    Packet ack = PacketFactory.createAck(
+                            header.sequenceNumber,
+                            header.sourceIp,
+                            header.sourcePort & 0xFFFF
+                    );
+                    NodeContext.socket.sendPacket(ack, packet.getAddress(), header.sourcePort & 0xFFFF);
+                }
+                return;
+            }
+        }
+
         if (header.type == 0x05) {
 
-            // Wenn Nachricht nicht für uns ist → weiterleiten
-            if (header.destinationIp != NodeContext.localIp) {
+            if (header.destinationIp != NodeContext.localIp ||
+                    (header.destinationPort & 0xFFFF) != NodeContext.localPort) {
 
-                System.out.println("MSG weiterleiten (Ziel " + header.destinationIp + ")");
-
-                // TTL reduzieren
                 header.ttl--;
-                if (header.ttl <= 0) {
-                    System.out.println("TTL abgelaufen. Paket verworfen.");
-                    return;
-                }
+                if (header.ttl <= 0) return;
 
-                // Route suchen
-                Route r = RoutingTable.getRoute(header.destinationIp, packet.getPort());
-
-                if (r == null) {
-                    System.out.println("Keine Route → MSG verworfen.");
-                    return;
-                }
+                Route r = RoutingTable.getRoute(header.destinationIp, header.destinationPort & 0xFFFF);
+                if (r == null) return;
 
                 String nextHop = IpUtil.intToIp(r.nextHopIp);
 
-                // Weiterleiten (reliable)
                 NodeContext.socket.sendReliable(
                         new Packet(header, payload),
                         nextHop,
@@ -159,91 +205,28 @@ public class PacketReceiver {
                 return;
             }
 
-            System.out.println("MSG empfangen, sende ACK zurück.");
+            String text = new String(payload, StandardCharsets.UTF_8);
+            System.out.println("MSG von " +
+                    IpUtil.intToIp(header.sourceIp) + ":" + (header.sourcePort & 0xFFFF) +
+                    " → " + text);
 
             Packet ack = PacketFactory.createAck(
                     header.sequenceNumber,
-                    NodeContext.localIp,
-                    header.sourceIp
+                    header.sourceIp,
+                    header.sourcePort & 0xFFFF
             );
 
             NodeContext.socket.sendPacket(
                     ack,
                     packet.getAddress(),
-                    packet.getPort()
+                    header.sourcePort & 0xFFFF
             );
 
             return;
         }
 
-        if (header.type == 0x03) { // HELLO
-            System.out.println("HELLO empfangen von " + header.sourceIp + ":" + packet.getPort());
-
-            // Direkte Route zum Nachbarn (Distance = 1)
-            Route r = new Route(
-                    header.sourceIp,
-                    packet.getPort(),
-                    header.sourceIp,      // Next-Hop ist direkt der Nachbar
-                    packet.getPort(),
-                    1
-            );
-            RoutingTable.addOrUpdate(r);
-
-            return;
-        }
-
-        if (header.type == 0x04) { // GOODBYE
-            System.out.println("GOODBYE empfangen von " + header.sourceIp + ":" + packet.getPort());
-
-            NeighborManager.markDead(header.sourceIp, packet.getPort());
-            RoutingTable.removeVia(header.sourceIp, packet.getPort());
-
-            return;
-        }
-
-        // FILE_CHUNK
         if (header.type == 0x06) {
-            System.out.println("FILE_CHUNK empfangen (Chunk " + header.chunkId + ")");
-            // TODO: FileAssembler
-            return;
-        }
-
-        // HEART_BEAT
-        if (header.type == 0x07) {
-            System.out.println("HEART_BEAT empfangen von " + header.sourceIp + ":" + packet.getPort());
-
-            // NeighborManager.updateOrAdd() oben in Receiver aktualisiert lastHeard automatisch
-
-            return;
-        }
-
-        // NO_ACK (Type 0x02) – zuerst behandeln, bevor FILE_CHUNK
-        if (header.type == 0x02) {
-            if (payload.length < 4) {
-                System.out.println("NO_ACK Payload zu kurz.");
-                return;
-            }
-
-            int missingChunkId =
-                    ((payload[0] & 0xFF) << 24) |
-                            ((payload[1] & 0xFF) << 16) |
-                            ((payload[2] & 0xFF) << 8)  |
-                            (payload[3] & 0xFF);
-
-            System.out.println("NO_ACK empfangen – fehlender Chunk: " + missingChunkId);
-
-            FileResender.resendChunk(
-                    header.sourceIp,     // Empfänger der Datei ist der NO_ACK-Sender
-                    packet.getPort(),
-                    missingChunkId
-            );
-            return;
-        }
-
-        // FILE_CHUNK (Type 0x06)
-        if (header.type == 0x06) {
-            ChunkAssembler.receiveChunk(header, payload, packet.getPort());
-            return;
+            ChunkAssembler.receiveChunk(header, payload, header.sourcePort & 0xFFFF);
         }
     }
 }

@@ -1,6 +1,7 @@
 package net.p2pchat.routing;
 
 public class Route {
+
     public int destIp;
     public int destPort;
     public int nextHopIp;
@@ -13,5 +14,12 @@ public class Route {
         this.nextHopIp = nextHopIp;
         this.nextHopPort = nextHopPort;
         this.distance = distance;
+    }
+
+    @Override
+    public String toString() {
+        return destIp + ":" + destPort +
+                " via " + nextHopIp + ":" + nextHopPort +
+                " dist=" + distance;
     }
 }

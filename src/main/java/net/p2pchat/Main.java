@@ -1,96 +1,111 @@
 package net.p2pchat;
 
+import net.p2pchat.file.FileSender;
 import net.p2pchat.model.Packet;
-import net.p2pchat.model.PacketHeader;
 import net.p2pchat.network.UdpSocket;
+import net.p2pchat.protocol.PacketFactory;
+import net.p2pchat.routing.RoutingManager;
 import net.p2pchat.util.IpUtil;
 
-import java.net.InetAddress;
-import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Scanner;
 
 public class Main {
 
     public static void main(String[] args) throws Exception {
 
-        if (args.length < 1) {
-            System.out.println("Usage: java net.p2pchat.Main <localPort>");
-            return;
-        }
+        if (args.length < 1) return;
 
         int localPort = Integer.parseInt(args[0]);
+        NodeContext.localPort = localPort;
 
-        // Socket + NodeContext initialisieren
         NodeContext.socket = new UdpSocket(localPort);
         NodeContext.socket.startReceiver();
         NodeContext.socket.startRetransmissionLoop();
 
         String localIpStr = IpUtil.intToIp(NodeContext.localIp);
+
         System.out.println("Node gestartet auf " + localIpStr + ":" + localPort);
         System.out.println("Befehle:");
+        System.out.println("  connect <ip> <port>");
         System.out.println("  msg <ip> <port> <text>");
+        System.out.println("  sendfile <ip> <port> <pfad>");
         System.out.println("  quit");
         System.out.println();
 
-        Scanner scanner = new Scanner(System.in);
+        Scanner sc = new Scanner(System.in);
 
         while (true) {
             System.out.print("> ");
-            if (!scanner.hasNextLine()) {
-                break;
-            }
-            String line = scanner.nextLine().trim();
-            if (line.isEmpty()) {
+            if (!sc.hasNextLine()) break;
+            String line = sc.nextLine().trim();
+            if (line.isEmpty()) continue;
+
+            if (line.equalsIgnoreCase("quit")) break;
+
+            if (line.startsWith("connect ")) {
+                String[] p = line.split(" ");
+                if (p.length != 3) continue;
+
+                String ip = p[1];
+                int port = Integer.parseInt(p[2]);
+
+                var hello = PacketFactory.createHello(
+                        NodeContext.seqGen.next(),
+                        IpUtil.ipToInt(ip),
+                        port
+                );
+
+                NodeContext.socket.sendPacket(
+                        hello,
+                        java.net.InetAddress.getByName(ip),
+                        port
+                );
+
                 continue;
             }
 
-            if (line.equalsIgnoreCase("quit") || line.equalsIgnoreCase("exit")) {
-                break;
+            if (line.startsWith("msg ")) {
+                String[] p = line.split(" ", 4);
+                if (p.length < 4) continue;
+
+                String ip = p[1];
+                int port = Integer.parseInt(p[2]);
+                String text = p[3];
+
+                int destIp = IpUtil.ipToInt(ip);
+
+                RoutingManager.sendMsg(destIp, port, text);
+                continue;
             }
 
-            // Nachricht senden: msg <ip> <port> <text...>
-            if (line.startsWith("msg ")) {
-                String[] parts = line.split(" ", 4);
-                if (parts.length < 4) {
-                    System.out.println("Syntax: msg <ip> <port> <text>");
-                    continue;
-                }
+            if (line.startsWith("sendfile ")) {
+                String[] p = line.split(" ");
+                if (p.length != 4) continue;
 
-                String destIpStr = parts[1];
-                int destPort;
+                String ip = p[1];
+                int port = Integer.parseInt(p[2]);
+                String path = p[3];
+
+                byte[] file;
                 try {
-                    destPort = Integer.parseInt(parts[2]);
-                } catch (NumberFormatException e) {
-                    System.out.println("Ungültiger Port.");
+                    file = Files.readAllBytes(Paths.get(path));
+                } catch (IOException e) {
+                    System.out.println("Kann Datei nicht lesen.");
                     continue;
                 }
-                String text = parts[3];
 
-                byte[] payload = text.getBytes(StandardCharsets.UTF_8);
+                int destIp = IpUtil.ipToInt(ip);
 
-                PacketHeader header = new PacketHeader();
-                header.type = 0x05; // MSG
-                header.sequenceNumber = NodeContext.seqGen.next();
-                header.sourceIp = NodeContext.localIp;
-                // bei lokalen Tests: alle Knoten teilen sich dieselbe IP (127.0.0.1 / deine LAN-IP)
-                header.destinationIp = NodeContext.localIp;
-                header.payloadLength = payload.length;
-                header.ttl = 10;
-                header.computeChecksum(payload);
-
-                Packet p = new Packet(header, payload);
-
-                // zuverlässig senden (du brauchst in UdpSocket: sendReliable(Packet, String, int))
-                NodeContext.socket.sendReliable(p, destIpStr, destPort);
-
-                System.out.println("MSG gesendet an " + destIpStr + ":" + destPort);
+                FileSender.sendFile(file, destIp, port);
                 continue;
             }
 
             System.out.println("Unbekannter Befehl.");
         }
 
-        System.out.println("Beende Node...");
         NodeContext.socket.stop();
     }
 }

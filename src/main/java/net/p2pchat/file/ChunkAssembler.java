@@ -4,7 +4,6 @@ import net.p2pchat.NodeContext;
 import net.p2pchat.model.PacketHeader;
 import net.p2pchat.network.UdpSocket;
 import net.p2pchat.protocol.PacketFactory;
-import org.w3c.dom.Node;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,13 +15,16 @@ public class ChunkAssembler {
         Map<Integer, byte[]> chunks = new ConcurrentHashMap<>();
     }
 
-    // key: sourceIp
-    private static final Map<Integer, FileBuffer> files = new ConcurrentHashMap<>();
+    private static final Map<String, FileBuffer> files = new ConcurrentHashMap<>();
+
+    private static String key(int ip, int port) {
+        return ip + ":" + port;
+    }
 
     public static void receiveChunk(PacketHeader header, byte[] payload, int senderPort) {
-        int src = header.sourceIp;
 
-        FileBuffer fb = files.computeIfAbsent(src, __ -> new FileBuffer());
+        String k = key(header.sourceIp, header.sourcePort & 0xFFFF);
+        FileBuffer fb = files.computeIfAbsent(k, __ -> new FileBuffer());
 
         if (fb.totalChunks == -1) {
             fb.totalChunks = header.chunkLength;
@@ -30,54 +32,52 @@ public class ChunkAssembler {
 
         fb.chunks.put(header.chunkId, payload);
 
-        System.out.println("FILE_CHUNK von " + src +
+        System.out.println("FILE_CHUNK von " + k +
                 " Chunk " + header.chunkId + "/" + (fb.totalChunks - 1));
 
-        // Prüfen, ob komplett
         if (fb.chunks.size() == fb.totalChunks) {
-            System.out.println("Datei von " + src + " vollständig empfangen.");
 
-            byte[] fileData = mergeChunks(fb);
+            System.out.println("Datei vollständig empfangen von " + k);
 
-            // TODO: fileData irgendwo speichern
+            byte[] data = mergeChunks(fb);
 
-            // ACK für Datei senden – hier nehmen wir einfach die seq des letzten Chunks
             int ackSeq = header.sequenceNumber;
+
             var ack = PacketFactory.createAck(
                     ackSeq,
-                    NodeContext.localIp,
-                    header.sourceIp
-            );
-            // SenderPort kam aus DatagramPacket
-            NodeContext.socket.sendPacket(ack,
-                    NodeContext.socket.socketAddressForIp(header.sourceIp), // s.u. oder packet.getAddress()
-                    senderPort
+                    header.sourceIp,
+                    header.sourcePort & 0xFFFF
             );
 
-            files.remove(src);
-        } else {
-            // Noch nicht fertig → fehlende Chunks suchen und evtl. NO_ACK schicken
-            for (int i = 0; i < fb.totalChunks; i++) {
-                if (!fb.chunks.containsKey(i)) {
-                    System.out.println("Chunk fehlt: " + i);
+            NodeContext.socket.sendPacket(
+                    ack,
+                    NodeContext.socket.socketAddressForIp(header.sourceIp),
+                    header.sourcePort & 0xFFFF
+            );
 
-                    var noAck = PacketFactory.createNoAck(
-                            NodeContext.seqGen.next(),
-                            NodeContext.localIp,
-                            header.sourceIp,
-                            i
-                    );
-                    // NO_ACK direkt an den Absender zurück
-                    // (Adresse hast du im PacketReceiver als packet.getAddress()/getPort())
-                    // → dort übergibst du senderPort / InetAddress.
-                    NodeContext.socket.sendPacket(noAck,
-                            NodeContext.socket.socketAddressForIp(header.sourceIp),
-                            senderPort);
-
-                    break;
-                }
-            }
+            files.remove(k);
+            return;
         }
+
+        List<Integer> missing = new ArrayList<>();
+        for (int i = 0; i < fb.totalChunks; i++) {
+            if (!fb.chunks.containsKey(i)) missing.add(i);
+        }
+
+        int[] missingArr = missing.stream().mapToInt(x -> x).toArray();
+
+        var noAck = PacketFactory.createNoAck(
+                NodeContext.seqGen.next(),
+                header.sourceIp,
+                header.sourcePort & 0xFFFF,
+                missingArr
+        );
+
+        NodeContext.socket.sendPacket(
+                noAck,
+                NodeContext.socket.socketAddressForIp(header.sourceIp),
+                header.sourcePort & 0xFFFF
+        );
     }
 
     private static byte[] mergeChunks(FileBuffer fb) {
@@ -86,20 +86,18 @@ public class ChunkAssembler {
 
         for (int i = 0; i < fb.totalChunks; i++) {
             byte[] c = fb.chunks.get(i);
-            if (c == null) {
-                // sollte bei vollständiger Datei nicht vorkommen
-                continue;
-            }
             ordered.add(c);
             totalLength += c.length;
         }
 
         byte[] out = new byte[totalLength];
         int pos = 0;
-        for (byte[] chunk : ordered) {
-            System.arraycopy(chunk, 0, out, pos, chunk.length);
-            pos += chunk.length;
+
+        for (byte[] part : ordered) {
+            System.arraycopy(part, 0, out, pos, part.length);
+            pos += part.length;
         }
+
         return out;
     }
 }

@@ -20,10 +20,10 @@ public class RoutingManager {
 
                 int seq = NodeContext.seqGen.next();
 
-                Packet p = PacketFactory.createRoutingUpdate(
+                var p = PacketFactory.createRoutingUpdate(
                         seq,
-                        NodeContext.localIp,
                         n.ip,
+                        n.port,
                         payload
                 );
 
@@ -34,43 +34,35 @@ public class RoutingManager {
                         InetAddress.getByName(destIpStr),
                         n.port
                 );
-
-                System.out.println("ROUTING_UPDATE an Nachbarn " + destIpStr + ":" + n.port +
-                        " (seq=" + seq + ")");
             }
 
         } catch (Exception e) {
             System.err.println("Fehler beim Senden von ROUTING_UPDATE: " + e.getMessage());
         }
     }
+
     public static void sendMsg(int destIp, int destPort, String text) {
         Route r = RoutingTable.getRoute(destIp, destPort);
-
-        if (r == null) {
-            System.out.println("Keine Route zu " + destIp + ":" + destPort);
-            return;
-        }
+        if (r == null) return;
 
         try {
             byte[] payload = text.getBytes();
-
             int seq = NodeContext.seqGen.next();
 
-            PacketHeader header = new PacketHeader();
-            header.type = 0x05; // MSG
-            header.sequenceNumber = seq;
-            header.sourceIp = NodeContext.localIp;
-            header.destinationIp = destIp;
-            header.payloadLength = payload.length;
-            header.ttl = 10; // Standard
-            header.computeChecksum(payload);
+            PacketHeader h = new PacketHeader();
+            h.type = 0x05;
+            h.sequenceNumber = seq;
+            h.sourceIp = NodeContext.localIp;
+            h.sourcePort = (short) NodeContext.localPort;
+            h.destinationIp = destIp;
+            h.destinationPort = (short) destPort;
+            h.payloadLength = payload.length;
+            h.ttl = 10;
+            h.computeChecksum(payload);
 
-            Packet msg = new Packet(header, payload);
+            Packet msg = new Packet(h, payload);
 
             String nextHop = IpUtil.intToIp(r.nextHopIp);
-
-            System.out.println("Sende MSG → " + nextHop + ":" + r.nextHopPort +
-                    " (Ziel = " + destIp + ":" + destPort + ")");
 
             NodeContext.socket.sendReliable(
                     msg,

@@ -19,8 +19,14 @@ public class RoutingTable {
         return routes.get(key(destIp, destPort));
     }
 
-    public static Map<String, Route> getAll() {
-        return routes;
+    public static Route getBestRoute(int destIp) {
+        Route best = null;
+        for (Route r : routes.values()) {
+            if (r.destIp == destIp) {
+                if (best == null || r.distance < best.distance) best = r;
+            }
+        }
+        return best;
     }
 
     public static void removeVia(int nextHopIp, int nextHopPort) {
@@ -28,5 +34,24 @@ public class RoutingTable {
             Route r = e.getValue();
             return r.nextHopIp == nextHopIp && r.nextHopPort == nextHopPort;
         });
+    }
+
+    public static void removeDestination(int destIp, int destPort) {
+        routes.remove(key(destIp, destPort));
+    }
+
+    public static Map<String, Route> getAll() {
+        return routes;
+    }
+
+    public static void print() {
+        System.out.println("RoutingTable:");
+        for (Route r : routes.values()) {
+            System.out.println(
+                    "  dest=" + r.destIp + ":" + r.destPort +
+                            " via=" + r.nextHopIp + ":" + r.nextHopPort +
+                            " dist=" + r.distance
+            );
+        }
     }
 }

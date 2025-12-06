@@ -11,58 +11,55 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class FileResender {
 
-    private static final Map<Integer, Map<Integer, byte[]>> sentFiles = new ConcurrentHashMap<>();
-    private static final Map<Integer, Integer> chunkCounts = new ConcurrentHashMap<>();
+    private static final Map<String, Map<Integer, byte[]>> sentFiles = new ConcurrentHashMap<>();
+    private static final Map<String, Integer> chunkCounts = new ConcurrentHashMap<>();
 
-    public static void registerFile(int destIp, int totalChunks) {
-        chunkCounts.put(destIp, totalChunks);
-        sentFiles.putIfAbsent(destIp, new ConcurrentHashMap<>());
+    private static String key(int ip, int port) {
+        return ip + ":" + port;
     }
 
-    public static void registerChunk(int destIp, int chunkId, byte[] data) {
-        sentFiles.putIfAbsent(destIp, new ConcurrentHashMap<>());
-        sentFiles.get(destIp).put(chunkId, data);
+    public static void registerFile(int destIp, int destPort, int totalChunks) {
+        String k = key(destIp, destPort);
+        chunkCounts.put(k, totalChunks);
+        sentFiles.putIfAbsent(k, new ConcurrentHashMap<>());
     }
 
-    public static void resendChunk(int destIp, int destPort, int chunkId) {
-        Map<Integer, byte[]> chunks = sentFiles.get(destIp);
-        if (chunks == null) {
-            System.out.println("Resend: keine Chunks für destIp bekannt.");
-            return;
-        }
+    public static void registerChunk(int destIp, int destPort, int chunkId, byte[] data) {
+        String k = key(destIp, destPort);
+        sentFiles.putIfAbsent(k, new ConcurrentHashMap<>());
+        sentFiles.get(k).put(chunkId, data);
+    }
 
-        byte[] chunk = chunks.get(chunkId);
-        if (chunk == null) {
-            System.out.println("Resend: Chunk " + chunkId + " nicht bekannt.");
-            return;
-        }
+    public static void resendChunks(int destIp, int destPort, int[] missing) {
+        String k = key(destIp, destPort);
 
-        int totalChunks = chunkCounts.getOrDefault(destIp, -1);
-        if (totalChunks <= 0) {
-            System.out.println("Resend: unknown totalChunks.");
-            return;
-        }
+        Map<Integer, byte[]> chunks = sentFiles.get(k);
+        if (chunks == null) return;
 
-        int seq = NodeContext.seqGen.next();
-
-        Packet p = PacketFactory.createFileChunk(
-                seq,
-                NodeContext.localIp,
-                destIp,
-                chunkId,
-                totalChunks,
-                chunk
-        );
+        Integer totalChunks = chunkCounts.get(k);
+        if (totalChunks == null || totalChunks <= 0) return;
 
         var route = RoutingManager.getRoute(destIp, destPort);
-        if (route == null) {
-            System.out.println("Resend: keine Route.");
-            return;
-        }
+        if (route == null) return;
 
         String nextHop = IpUtil.intToIp(route.nextHopIp);
-        NodeContext.socket.sendReliable(p, nextHop, route.nextHopPort);
 
-        System.out.println("Chunk " + chunkId + " erneut gesendet → " + nextHop + ":" + route.nextHopPort);
+        for (int chunkId : missing) {
+            byte[] data = chunks.get(chunkId);
+            if (data == null) continue;
+
+            int seq = NodeContext.seqGen.next();
+
+            Packet p = PacketFactory.createFileChunk(
+                    seq,
+                    destIp,
+                    destPort,
+                    chunkId,
+                    totalChunks,
+                    data
+            );
+
+            NodeContext.socket.sendReliable(p, nextHop, route.nextHopPort);
+        }
     }
 }

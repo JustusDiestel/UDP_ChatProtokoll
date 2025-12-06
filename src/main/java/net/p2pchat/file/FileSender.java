@@ -6,53 +6,55 @@ import net.p2pchat.model.Packet;
 import net.p2pchat.routing.RoutingManager;
 import net.p2pchat.util.IpUtil;
 
-import java.net.InetAddress;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class FileSender {
 
-    private static final Map<Integer, Integer> chunkCounts = new ConcurrentHashMap<>();
+    private static final Map<String, Integer> chunkCounts = new ConcurrentHashMap<>();
 
-    public static int getChunkCount(int destIp) {
-        return chunkCounts.getOrDefault(destIp, -1);
+    private static String key(int ip, int port) {
+        return ip + ":" + port;
+    }
+
+    public static int getChunkCount(int destIp, int destPort) {
+        return chunkCounts.getOrDefault(key(destIp, destPort), -1);
     }
 
     public static void sendFile(byte[] data, int destIp, int destPort) {
 
+        var route = RoutingManager.getRoute(destIp, destPort);
+        if (route == null) {
+            System.out.println("Keine Route für Dateiübertragung.");
+            return;
+        }
+
         List<byte[]> chunks = Chunker.split(data);
-        int totalChunks = chunks.size();
+        int total = chunks.size();
 
-        chunkCounts.put(destIp, totalChunks);
+        chunkCounts.put(key(destIp, destPort), total);
+        FileResender.registerFile(destIp, destPort, total);
 
-        System.out.println("Sende Datei in " + totalChunks + " Chunks...");
+        System.out.println("Sende Datei in " + total + " Chunks...");
 
-        for (int i = 0; i < totalChunks; i++) {
+        String nextHop = IpUtil.intToIp(route.nextHopIp);
+
+        for (int i = 0; i < total; i++) {
 
             byte[] chunk = chunks.get(i);
-
-            // für NO_ACK speichern
-            FileResender.registerChunk(destIp, i, chunk);
+            FileResender.registerChunk(destIp, destPort, i, chunk);
 
             int seq = NodeContext.seqGen.next();
 
             Packet p = PacketFactory.createFileChunk(
                     seq,
-                    NodeContext.localIp,
                     destIp,
+                    destPort,
                     i,
-                    totalChunks,
+                    total,
                     chunk
             );
-
-            var route = RoutingManager.getRoute(destIp, destPort);
-            if (route == null) {
-                System.out.println("Keine Route für Dateiübertragung.");
-                return;
-            }
-
-            String nextHop = IpUtil.intToIp(route.nextHopIp);
 
             NodeContext.socket.sendReliable(
                     p,

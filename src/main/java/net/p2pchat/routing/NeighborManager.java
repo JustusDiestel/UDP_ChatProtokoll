@@ -18,17 +18,15 @@ public class NeighborManager {
             if (old == null) {
                 System.out.println("Neuer Nachbar: " + k);
                 return new Neighbor(ip, port);
-            } else {
-                old.updateLastHeard();
-                return old;
             }
+            old.updateLastHeard();
+            return old;
         });
     }
 
     public static void markDead(int ip, int port) {
         String k = key(ip, port);
         Neighbor n = neighbors.get(k);
-
         if (n != null) {
             n.alive = false;
             System.out.println("Nachbar tot: " + k);
