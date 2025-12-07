@@ -6,6 +6,7 @@ import net.p2pchat.model.Packet;
 import net.p2pchat.routing.RoutingManager;
 import net.p2pchat.util.IpUtil;
 
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -18,11 +19,7 @@ public class FileSender {
         return ip + ":" + port;
     }
 
-    public static int getChunkCount(int destIp, int destPort) {
-        return chunkCounts.getOrDefault(key(destIp, destPort), -1);
-    }
-
-    public static void sendFile(byte[] data, int destIp, int destPort) {
+    public static void sendFile(byte[] data, int destIp, int destPort, String path) {
 
         var route = RoutingManager.getRoute(destIp, destPort);
         if (route == null) {
@@ -30,17 +27,36 @@ public class FileSender {
             return;
         }
 
+        // ECHTEN Dateinamen extrahieren
+        String filename = Paths.get(path).getFileName().toString();
+
         List<byte[]> chunks = Chunker.split(data);
-        int total = chunks.size();
+        int totalChunks = chunks.size();
 
-        chunkCounts.put(key(destIp, destPort), total);
-        FileResender.registerFile(destIp, destPort, total);
-
-        System.out.println("Sende Datei in " + total + " Chunks...");
+        FileResender.registerFile(destIp, destPort, totalChunks);
 
         String nextHop = IpUtil.intToIp(route.nextHopIp);
 
-        for (int i = 0; i < total; i++) {
+        // FILE_INFO senden (NICHT reliable)
+        int seqInfo = NodeContext.seqGen.next();
+        Packet info = PacketFactory.createFileInfo(
+                seqInfo,
+                destIp,
+                destPort,
+                totalChunks,
+                filename              // <- HIER der echte Dateiname
+        );
+
+        NodeContext.socket.sendPacket(
+                info,
+                NodeContext.socket.socketAddressForIp(route.nextHopIp),
+                route.nextHopPort
+        );
+
+        System.out.println("FILE_INFO gesendet: " + filename + " | Chunks=" + totalChunks);
+
+        // Datei-Chunks senden (RELIABLE)
+        for (int i = 0; i < totalChunks; i++) {
 
             byte[] chunk = chunks.get(i);
             FileResender.registerChunk(destIp, destPort, i, chunk);
@@ -52,7 +68,7 @@ public class FileSender {
                     destIp,
                     destPort,
                     i,
-                    total,
+                    totalChunks,
                     chunk
             );
 

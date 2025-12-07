@@ -5,6 +5,7 @@ import net.p2pchat.model.Packet;
 import net.p2pchat.model.PacketHeader;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 
 public class PacketFactory {
 
@@ -104,19 +105,57 @@ public class PacketFactory {
         return new Packet(h, payload);
     }
 
-    public static Packet createFileChunk(int seq, int destIp, int destPort, int chunkId, int chunkCount, byte[] data) {
+    public static Packet createFileChunk(
+            int seq,
+            int destIp,
+            int destPort,
+            int chunkId,
+            int chunkCount,
+            byte[] data
+    ) {
         PacketHeader h = new PacketHeader();
         h.type = 0x06;
         h.sequenceNumber = seq;
         h.sourceIp = NodeContext.localIp;
         h.sourcePort = (short) NodeContext.localPort;
-        h.destinationIp = destIp;
-        h.destinationPort = (short) destPort;
+        h.destinationIp = destIp;              // KORREKT
+        h.destinationPort = (short) destPort;  // KORREKT
         h.payloadLength = data.length;
         h.ttl = 10;
         h.chunkId = chunkId;
         h.chunkLength = chunkCount;
         h.computeChecksum(data);
+
         return new Packet(h, data);
+    }
+
+    public static Packet createFileInfo(
+            int seq,
+            int destIp,
+            int destPort,
+            int totalChunks,
+            String filename
+    ) {
+        byte[] nameBytes = filename.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer buf = ByteBuffer.allocate(4 + 2 + nameBytes.length);
+
+        buf.putInt(totalChunks);
+        buf.putShort((short) nameBytes.length);
+        buf.put(nameBytes);
+
+        byte[] payload = buf.array();
+
+        PacketHeader h = new PacketHeader();
+        h.type = 0x09;
+        h.sequenceNumber = seq;
+        h.sourceIp = NodeContext.localIp;
+        h.sourcePort = (short) NodeContext.localPort;
+        h.destinationIp = destIp;
+        h.destinationPort = (short) destPort;
+        h.payloadLength = payload.length;
+        h.ttl = 10;
+        h.computeChecksum(payload);
+
+        return new Packet(h, payload);
     }
 }

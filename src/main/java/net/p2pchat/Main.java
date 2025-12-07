@@ -45,6 +45,12 @@ public class Main {
 
             if (line.equalsIgnoreCase("quit")) break;
 
+            if (line.equals("routes")) {
+                net.p2pchat.routing.RoutingTable.printTable(localIpStr + ":" + localPort);
+                continue;
+            }
+
+
             if (line.startsWith("connect ")) {
                 String[] p = line.split(" ");
                 if (p.length != 3) continue;
@@ -99,7 +105,7 @@ public class Main {
 
                 int destIp = IpUtil.ipToInt(ip);
 
-                FileSender.sendFile(file, destIp, port);
+                FileSender.sendFile(file, destIp, port, path);
                 continue;
             }
 

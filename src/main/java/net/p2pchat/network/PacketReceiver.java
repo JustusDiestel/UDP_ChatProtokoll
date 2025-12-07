@@ -56,6 +56,7 @@ public class PacketReceiver {
         if (!valid) return;
 
         if (header.type == 0x08) {
+
             ByteBuffer buf = ByteBuffer.wrap(payload);
 
             int entryCount = buf.getShort() & 0xFFFF;
@@ -65,13 +66,25 @@ public class PacketReceiver {
             int nextHopPort = header.sourcePort & 0xFFFF;
 
             for (int i = 0; i < entryCount; i++) {
+
                 int destIp = buf.getInt();
                 int destPort = buf.getShort() & 0xFFFF;
                 int receivedDistance = buf.get() & 0xFF;
 
                 int newDistance = receivedDistance + 1;
 
+                // Nie Route zu mir selbst übernehmen
+                if (destIp == NodeContext.localIp &&
+                        destPort == NodeContext.localPort) {
+                    continue;
+                }
+
                 Route existing = RoutingTable.getRoute(destIp, destPort);
+
+                // Direkte Routes (Dist=1) niemals überschreiben
+                if (existing != null && existing.distance == 1) {
+                    continue;
+                }
 
                 if (existing == null) {
                     Route r = new Route(destIp, destPort, nextHopIp, nextHopPort, newDistance);
@@ -85,18 +98,11 @@ public class PacketReceiver {
                     existing.nextHopPort = nextHopPort;
                     existing.distance = newDistance;
                     tableChanged = true;
-                    continue;
-                }
-
-                if (existing.nextHopIp == nextHopIp && existing.nextHopPort == nextHopPort) {
-                    existing.distance = newDistance;
-                    tableChanged = true;
                 }
             }
 
             if (tableChanged) {
-                System.out.println("Routing-Tabelle aktualisiert durch Update von " +
-                        IpUtil.intToIp(header.sourceIp) + ":" + (header.sourcePort & 0xFFFF));
+                net.p2pchat.routing.RoutingManager.broadcastRoutingUpdate();
             }
 
             return;
@@ -132,6 +138,8 @@ public class PacketReceiver {
                         packet.getAddress(),
                         srcPort
                 );
+
+                net.p2pchat.routing.RoutingManager.broadcastRoutingUpdate();
             }
 
             return;
@@ -168,23 +176,10 @@ public class PacketReceiver {
             return;
         }
 
-        if (header.type == 0x05 || header.type == 0x06) {
-            boolean duplicate = receivedHistory.isDuplicate(header.sourceIp, header.sequenceNumber);
-            if (duplicate) {
-                if (header.type == 0x05) {
-                    Packet ack = PacketFactory.createAck(
-                            header.sequenceNumber,
-                            header.sourceIp,
-                            header.sourcePort & 0xFFFF
-                    );
-                    NodeContext.socket.sendPacket(ack, packet.getAddress(), header.sourcePort & 0xFFFF);
-                }
-                return;
-            }
-        }
-
+        // MSG
         if (header.type == 0x05) {
 
+            // nicht für mich → nur weiterleiten, KEIN Duplicate-Check
             if (header.destinationIp != NodeContext.localIp ||
                     (header.destinationPort & 0xFFFF) != NodeContext.localPort) {
 
@@ -202,6 +197,22 @@ public class PacketReceiver {
                         r.nextHopPort
                 );
 
+                return;
+            }
+
+            // ab hier: Paket ist für mich → Duplicate-Check
+            boolean duplicate = receivedHistory.isDuplicate(header.sourceIp, header.sequenceNumber);
+            if (duplicate) {
+                Packet ack = PacketFactory.createAck(
+                        header.sequenceNumber,
+                        header.sourceIp,
+                        header.sourcePort & 0xFFFF
+                );
+                NodeContext.socket.sendPacket(
+                        ack,
+                        packet.getAddress(),
+                        header.sourcePort & 0xFFFF
+                );
                 return;
             }
 
@@ -225,8 +236,76 @@ public class PacketReceiver {
             return;
         }
 
+// FILE_CHUNK (0x06)
         if (header.type == 0x06) {
-            ChunkAssembler.receiveChunk(header, payload, header.sourcePort & 0xFFFF);
+
+            if (header.destinationIp != NodeContext.localIp ||
+                    (header.destinationPort & 0xFFFF) != NodeContext.localPort) {
+
+                header.ttl--;
+                if (header.ttl <= 0) return;
+
+                Route r = RoutingTable.getRoute(header.destinationIp, header.destinationPort & 0xFFFF);
+                if (r == null) return;
+
+                NodeContext.socket.sendReliable(
+                        new Packet(header, payload),
+                        IpUtil.intToIp(r.nextHopIp),
+                        r.nextHopPort
+                );
+                return;
+            }
+
+            // Für mich
+            if (!receivedHistory.isDuplicate(header.sourceIp, header.sequenceNumber)) {
+                ChunkAssembler.receiveChunk(header, payload, header.sourcePort & 0xFFFF);
+            }
+
+            return;
+        }
+
+        if (header.type == 0x09) {
+
+            // Duplicate prüfen (WICHTIG)
+            if (receivedHistory.isDuplicate(header.sourceIp, header.sequenceNumber)) {
+                return;
+            }
+
+            // Wenn nicht für mich → FORWARD (NICHT reliable!)
+            if (header.destinationIp != NodeContext.localIp ||
+                    (header.destinationPort & 0xFFFF) != NodeContext.localPort) {
+
+                header.ttl--;
+                if (header.ttl <= 0) return;
+
+                Route r = RoutingTable.getRoute(header.destinationIp, header.destinationPort & 0xFFFF);
+                if (r == null) return;
+
+                NodeContext.socket.sendPacket(
+                        new Packet(header, payload),
+                        NodeContext.socket.socketAddressForIp(r.nextHopIp),
+                        r.nextHopPort
+                );
+
+                return;
+            }
+
+            // FILE_INFO ist für mich → payload auslesen
+            ByteBuffer buf = ByteBuffer.wrap(payload);
+            int totalChunks = buf.getInt();
+            int nameLen = buf.getShort() & 0xFFFF;
+            byte[] nameBytes = new byte[nameLen];
+            buf.get(nameBytes);
+
+            String filename = new String(nameBytes, StandardCharsets.UTF_8);
+
+            // FileInfo speichern
+            ChunkAssembler.setFileInfo(header, totalChunks, filename);
+
+            System.out.println("FILE_INFO empfangen → Datei: " + filename + " | Chunks: " + totalChunks);
+
+            return;
         }
     }
+
 }

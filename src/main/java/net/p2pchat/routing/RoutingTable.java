@@ -54,4 +54,16 @@ public class RoutingTable {
             );
         }
     }
+
+    public static void printTable(String prefix) {
+        System.out.println("=== ROUTING TABLE (" + prefix + ") ===");
+        for (var e : routes.entrySet()) {
+            Route r = e.getValue();
+            System.out.println(
+                    "dest=" + r.destIp + ":" + r.destPort +
+                            " -> nextHop=" + r.nextHopIp + ":" + r.nextHopPort +
+                            " dist=" + r.distance
+            );
+        }
+    }
 }

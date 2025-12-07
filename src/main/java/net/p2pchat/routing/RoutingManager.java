@@ -36,6 +36,7 @@ public class RoutingManager {
                 );
             }
 
+
         } catch (Exception e) {
             System.err.println("Fehler beim Senden von ROUTING_UPDATE: " + e.getMessage());
         }
