@@ -21,25 +21,25 @@ public class ChunkAssembler {
     private static final Map<String, FileBuffer> files = new ConcurrentHashMap<>();
 
     private static String fileKey(PacketHeader h) {
-        return h.sourceIp + ":" + h.destinationIp + ":" + (h.destinationPort & 0xFFFF);
+        return h.sourceIp + ":" + (h.destinationPort & 0xFFFF);
     }
 
     public static void setFileInfo(PacketHeader header, int totalChunks, String originalName) {
+
         String k = fileKey(header);
         FileBuffer fb = files.computeIfAbsent(k, __ -> new FileBuffer());
         fb.totalChunks = totalChunks;
 
-        int recvPort = header.destinationPort & 0xFFFF;
+        int senderPort = header.destinationPort & 0xFFFF;
 
         int dot = originalName.lastIndexOf('.');
         String base = (dot > 0) ? originalName.substring(0, dot) : originalName;
         String ext = (dot > 0) ? originalName.substring(dot) : ".bin";
 
-        fb.filename = base + "_" + recvPort + ext;
-        System.out.println("FILE_INFO gespeichert → " + fb.filename + " (" + totalChunks + " Chunks)");
+        fb.filename = base + "_" + senderPort + ext;
     }
 
-    public static void receiveChunk(PacketHeader header, byte[] payload, int senderPort) {
+    public static void receiveChunk(PacketHeader header, byte[] payload) {
 
         String k = fileKey(header);
         FileBuffer fb = files.computeIfAbsent(k, __ -> new FileBuffer());
@@ -50,31 +50,24 @@ public class ChunkAssembler {
 
         fb.chunks.put(header.chunkId, payload);
 
-        System.out.println("FILE_CHUNK " + header.chunkId + "/" + (fb.totalChunks - 1) + " von " + k);
-
         if (fb.chunks.size() == fb.totalChunks) {
-
-            System.out.println("Datei vollständig empfangen von " + k);
 
             byte[] data = mergeChunks(fb);
 
             try {
                 Files.write(Paths.get(fb.filename), data);
-                System.out.println("Datei gespeichert als: " + fb.filename);
-            } catch (IOException e) {
-                System.out.println("Fehler beim Speichern der Datei: " + e.getMessage());
-            }
+            } catch (IOException ignored) {}
 
             var ack = PacketFactory.createAck(
                     header.sequenceNumber,
                     header.sourceIp,
-                    header.sourcePort & 0xFFFF
+                    header.destinationPort & 0xFFFF
             );
 
             NodeContext.socket.sendPacket(
                     ack,
                     NodeContext.socket.socketAddressForIp(header.sourceIp),
-                    header.sourcePort & 0xFFFF
+                    header.destinationPort & 0xFFFF
             );
 
             files.remove(k);
@@ -91,16 +84,16 @@ public class ChunkAssembler {
         int[] missingArr = missing.stream().mapToInt(x -> x).toArray();
 
         var noAck = PacketFactory.createNoAck(
-                NodeContext.seqGen.next(),
+                header.sequenceNumber,
                 header.sourceIp,
-                header.sourcePort & 0xFFFF,
+                header.destinationPort & 0xFFFF,
                 missingArr
         );
 
         NodeContext.socket.sendPacket(
                 noAck,
                 NodeContext.socket.socketAddressForIp(header.sourceIp),
-                header.sourcePort & 0xFFFF
+                header.destinationPort & 0xFFFF
         );
     }
 

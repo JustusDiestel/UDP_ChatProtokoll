@@ -7,100 +7,116 @@ import java.util.Arrays;
 
 public class PacketHeader {
 
-    public byte type;                  // 1
-    public int sequenceNumber;         // 4
-    public int destinationIp;          // 4
-    public int sourceIp;               // 4
+    public byte type;               // 1 byte
+    public int sequenceNumber;      // 4 bytes
 
-    public short sourcePort;           // 2  (NEU)
-    public short destinationPort;      // 2  (NEU)
+    // Reihenfolge exakt wie im Protokoll
+    public int destinationIp;       // 4 bytes
+    public int sourceIp;            // 4 bytes
 
-    public int payloadLength;          // 4
-    public int chunkId;                // 4
-    public int chunkLength;            // 4
+    public short destinationPort;   // 2 bytes (final destination port)
+    public short sourcePort;        // 2 bytes (original sender port)
 
-    public byte ttl;                   // 1
+    public int payloadLength;       // 4 bytes
+    public int chunkId;             // 4 bytes
+    public int chunkLength;         // 4 bytes
 
-    public byte[] checksum = new byte[32]; // 32 bytes SHA-256
+    public byte ttl;                // 1 byte
 
-    public static final int HEADER_SIZE = 62; // korrekt berechnet
+    public byte[] checksum = new byte[32]; // SHA-256 checksum (32 bytes)
 
+    public static final int HEADER_SIZE =
+            1 +        // type
+                    4 +        // sequenceNumber
+                    4 +        // destinationIp
+                    4 +        // sourceIp
+                    2 +        // destinationPort
+                    2 +        // sourcePort
+                    4 +        // payloadLength
+                    4 +        // chunkId
+                    4 +        // chunkLength
+                    1 +        // ttl
+                    32;        // checksum
+
+
+    // SERIALIZE ===============================================================
     public byte[] toBytes() {
-        ByteBuffer buffer = ByteBuffer.allocate(HEADER_SIZE);
+        ByteBuffer buf = ByteBuffer.allocate(HEADER_SIZE);
 
-        buffer.put(type);
-        buffer.putInt(sequenceNumber);
-        buffer.putInt(destinationIp);
-        buffer.putInt(sourceIp);
+        buf.put(type);
+        buf.putInt(sequenceNumber);
 
-        buffer.putShort(sourcePort);
-        buffer.putShort(destinationPort);
+        buf.putInt(destinationIp);
+        buf.putInt(sourceIp);
 
-        buffer.putInt(payloadLength);
-        buffer.putInt(chunkId);
-        buffer.putInt(chunkLength);
+        buf.putShort(destinationPort);
+        buf.putShort(sourcePort);
 
-        buffer.put(ttl);
-        buffer.put(checksum);
+        buf.putInt(payloadLength);
+        buf.putInt(chunkId);
+        buf.putInt(chunkLength);
 
-        return buffer.array();
+        buf.put(ttl);
+        buf.put(checksum);
+
+        return buf.array();
     }
 
-    public static PacketHeader fromBytes(byte[] bytes) {
-        if (bytes.length < HEADER_SIZE) {
-            throw new IllegalArgumentException("Header zu klein! " + bytes.length + " < " + HEADER_SIZE);
-        }
 
-        ByteBuffer buffer = ByteBuffer.wrap(bytes);
+    // DESERIALIZE =============================================================
+    public static PacketHeader fromBytes(byte[] bytes) {
+        if (bytes.length < HEADER_SIZE)
+            throw new IllegalArgumentException("Header zu klein: " + bytes.length);
+
+        ByteBuffer buf = ByteBuffer.wrap(bytes);
         PacketHeader h = new PacketHeader();
 
-        h.type = buffer.get();
-        h.sequenceNumber = buffer.getInt();
-        h.destinationIp = buffer.getInt();
-        h.sourceIp = buffer.getInt();
+        h.type = buf.get();
+        h.sequenceNumber = buf.getInt();
 
-        h.sourcePort = buffer.getShort();
-        h.destinationPort = buffer.getShort();
+        h.destinationIp = buf.getInt();
+        h.sourceIp = buf.getInt();
 
-        h.payloadLength = buffer.getInt();
-        h.chunkId = buffer.getInt();
-        h.chunkLength = buffer.getInt();
+        h.destinationPort = buf.getShort();
+        h.sourcePort = buf.getShort();
 
-        h.ttl = buffer.get();
+        h.payloadLength = buf.getInt();
+        h.chunkId = buf.getInt();
+        h.chunkLength = buf.getInt();
 
-        buffer.get(h.checksum);
+        h.ttl = buf.get();
+        buf.get(h.checksum);
 
         return h;
     }
 
+
+    // CHECKSUM =================================================================
     public void computeChecksum(byte[] payload) {
         this.checksum = HashUtil.sha256(payload);
     }
 
 
-    @Override
-    public String toString() {
-        StringBuilder sb = new StringBuilder();
+    // DEEP COPY ================================================================
+    public PacketHeader copy() {
+        PacketHeader h = new PacketHeader();
 
-        sb.append("PacketHeader {\n");
-        sb.append("  type            = ").append(type).append("\n");
-        sb.append("  sequenceNumber  = ").append(sequenceNumber).append("\n");
-        sb.append("  destinationIp   = ").append(destinationIp).append("\n");
-        sb.append("  sourceIp        = ").append(sourceIp).append("\n");
-        sb.append("  sourcePort      = ").append(sourcePort & 0xFFFF).append("\n");
-        sb.append("  destinationPort = ").append(destinationPort & 0xFFFF).append("\n");
-        sb.append("  payloadLength   = ").append(payloadLength).append("\n");
-        sb.append("  chunkId         = ").append(chunkId).append("\n");
-        sb.append("  chunkLength     = ").append(chunkLength).append("\n");
-        sb.append("  ttl             = ").append(ttl).append("\n");
-        sb.append("  checksum        = ");
+        h.type = type;
+        h.sequenceNumber = sequenceNumber;
 
-        for (byte b : checksum) {
-            sb.append(String.format("%02X", b)).append(" ");
-        }
-        sb.append("\n}");
+        h.destinationIp = destinationIp;
+        h.sourceIp = sourceIp;
 
-        return sb.toString();
+        h.destinationPort = destinationPort;
+        h.sourcePort = sourcePort;
+
+        h.payloadLength = payloadLength;
+        h.chunkId = chunkId;
+        h.chunkLength = chunkLength;
+
+        h.ttl = ttl;
+        h.checksum = Arrays.copyOf(checksum, checksum.length);
+
+        return h;
     }
-
 }

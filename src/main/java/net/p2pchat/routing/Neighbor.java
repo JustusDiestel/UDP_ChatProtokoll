@@ -1,10 +1,12 @@
 package net.p2pchat.routing;
 
 public class Neighbor {
-    public int ip;
-    public int port;
-    public long lastHeard;
-    public boolean alive;
+
+    public final int ip;
+    public final int port;
+
+    public volatile long lastHeard;
+    public volatile boolean alive;
 
     public Neighbor(int ip, int port) {
         this.ip = ip;
@@ -16,5 +18,9 @@ public class Neighbor {
     public void updateLastHeard() {
         this.lastHeard = System.currentTimeMillis();
         this.alive = true;
+    }
+
+    public void markDead() {
+        this.alive = false;
     }
 }

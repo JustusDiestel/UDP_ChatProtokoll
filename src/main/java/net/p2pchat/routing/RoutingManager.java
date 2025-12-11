@@ -1,92 +1,109 @@
 package net.p2pchat.routing;
 
 import net.p2pchat.NodeContext;
-import net.p2pchat.model.PacketHeader;
-import net.p2pchat.protocol.PacketFactory;
 import net.p2pchat.model.Packet;
+import net.p2pchat.protocol.PacketFactory;
 import net.p2pchat.util.IpUtil;
 
 import java.net.InetAddress;
+import java.util.Map;
 
 public class RoutingManager {
 
+    /**
+     * Broadcastet Routing-Updates an alle lebenden Nachbarn.
+     * Für jeden Nachbarn wird ein EIGENES Payload generiert
+     * (Split Horizon + Poison Reverse).
+     */
     public static void broadcastRoutingUpdate() {
-        try {
-            byte[] payload = RoutingUpdateUtil.buildPayloadFromRoutingTable();
 
-            for (var entry : NeighborManager.getAll().entrySet()) {
-                Neighbor n = entry.getValue();
-                if (!n.alive) continue;
+        for (Map.Entry<String, Neighbor> entry : NeighborManager.getAll().entrySet()) {
+
+            Neighbor n = entry.getValue();
+            if (!n.alive) continue;
+
+            try {
+                // Payload mit Split Horizon / Poison Reverse
+                byte[] payload = RoutingUpdateUtil.buildPayloadForNeighbor(n.ip, n.port);
 
                 int seq = NodeContext.seqGen.next();
 
-                var p = PacketFactory.createRoutingUpdate(
+                Packet update = PacketFactory.createRoutingUpdate(
                         seq,
-                        n.ip,
-                        n.port,
+                        n.ip,      // destinationIp
+                        n.port,    // destinationPort
                         payload
                 );
 
-                String destIpStr = IpUtil.intToIp(n.ip);
+                InetAddress addr = InetAddress.getByName(IpUtil.intToIp(n.ip));
 
-                NodeContext.socket.sendPacket(
-                        p,
-                        InetAddress.getByName(destIpStr),
-                        n.port
+                NodeContext.socket.sendPacket(update, addr, n.port);
+
+                System.out.println("ROUTING_UPDATE → "
+                        + IpUtil.intToIp(n.ip) + ":" + n.port
+                        + " | entries=" + (payload.length / 7));
+
+            } catch (Exception e) {
+                System.err.println(
+                        "Fehler bei ROUTING_UPDATE an "
+                                + IpUtil.intToIp(n.ip) + ":" + n.port
+                                + " → " + e.getMessage()
                 );
             }
-
-
-        } catch (Exception e) {
-            System.err.println("Fehler beim Senden von ROUTING_UPDATE: " + e.getMessage());
         }
     }
 
+
+    /**
+     * MSG zuverlässig über die Routing-Tabelle senden.
+     */
     public static void sendMsg(int destIp, int destPort, String text) {
+
         Route r = RoutingTable.getRoute(destIp, destPort);
-        if (r == null) return;
+        if (r == null) {
+            System.out.println("Keine Route zu " + destIp + ":" + destPort);
+            return;
+        }
 
         try {
-            byte[] payload = text.getBytes();
             int seq = NodeContext.seqGen.next();
 
-            PacketHeader h = new PacketHeader();
-            h.type = 0x05;
-            h.sequenceNumber = seq;
-            h.sourceIp = NodeContext.localIp;
-            h.sourcePort = (short) NodeContext.localPort;
-            h.destinationIp = destIp;
-            h.destinationPort = (short) destPort;
-            h.payloadLength = payload.length;
-            h.ttl = 10;
-            h.computeChecksum(payload);
+            Packet msg = PacketFactory.createMessage(
+                    seq,
+                    destIp,
+                    destPort,
+                    text
+            );
 
-            Packet msg = new Packet(h, payload);
-
-            String nextHop = IpUtil.intToIp(r.nextHopIp);
+            String nextHopStr = IpUtil.intToIp(r.nextHopIp);
 
             NodeContext.socket.sendReliable(
                     msg,
-                    nextHop,
+                    nextHopStr,
                     r.nextHopPort
             );
+
+            System.out.println("MSG gesendet → \"" + text + "\" via "
+                    + nextHopStr + ":" + r.nextHopPort);
 
         } catch (Exception e) {
             System.err.println("Fehler beim MSG-Senden: " + e.getMessage());
         }
     }
 
+
+    // Convenience-Methoden
     public static Route getRoute(int destIp, int destPort) {
         return RoutingTable.getRoute(destIp, destPort);
     }
 
     public static int getNextHopIp(int destIp, int destPort) {
-        var r = RoutingTable.getRoute(destIp, destPort);
+        Route r = RoutingTable.getRoute(destIp, destPort);
         return (r != null) ? r.nextHopIp : -1;
     }
 
     public static int getNextHopPort(int destIp, int destPort) {
-        var r = RoutingTable.getRoute(destIp, destPort);
+        Route r = RoutingTable.getRoute(destIp, destPort);
         return (r != null) ? r.nextHopPort : -1;
     }
 }

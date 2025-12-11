@@ -8,26 +8,24 @@ public class DuplicateDetector {
 
     private static final int MAX_HISTORY = 10000;
 
-    // IP -> Set der letzten SequenceNumbers
-    private final ConcurrentHashMap<Integer, Set<Integer>> history = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, Set<Integer>> history =
+            new ConcurrentHashMap<>();
 
-    public boolean isDuplicateGet(int sourceIp, int sequenceNumber) {
+    public boolean isDuplicate(int sourceIp, int sequenceNumber) {
 
         Set<Integer> set = history.computeIfAbsent(
                 sourceIp,
                 k -> Collections.newSetFromMap(new ConcurrentHashMap<>())
         );
 
-        // ist diese Seq schon bekannt?
         if (!set.add(sequenceNumber)) {
-            return true; // Duplikat!
+            return true;
         }
 
-        // Set zu groß? -> alten Kram entfernen
         if (set.size() > MAX_HISTORY) {
-            set.clear(); // einfache Variante: komplett zurücksetzen
+            set.clear();
         }
 
-        return false; // nicht gesehen -> verarbeiten!
+        return false;
     }
 }

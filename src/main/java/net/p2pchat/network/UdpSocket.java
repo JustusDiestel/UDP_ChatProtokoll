@@ -1,5 +1,6 @@
 package net.p2pchat.network;
 
+import net.p2pchat.NodeContext;
 import net.p2pchat.model.Packet;
 import net.p2pchat.protocol.PendingPackets;
 import net.p2pchat.util.IpUtil;
@@ -11,7 +12,11 @@ public class UdpSocket {
 
     private final int port;
     private DatagramSocket socket;
-    private boolean running;
+
+    private volatile boolean running;
+
+    private Thread receiverThread;
+    private Thread retransmissionThread;
 
     public UdpSocket(int port) {
         this.port = port;
@@ -22,86 +27,147 @@ public class UdpSocket {
         }
     }
 
+    // ============================================================
+    // RECEIVER THREAD
+    // ============================================================
     public void startReceiver() {
+
         running = true;
 
-        Thread receiverThread = new Thread(() -> {
-            byte[] buffer = new byte[2048];
+        receiverThread = new Thread(() -> {
+            byte[] buffer = new byte[4096];
 
             while (running) {
+
                 try {
-                    DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-                    socket.receive(packet);
-                    PacketReceiver.handle(packet);
+                    DatagramPacket dp = new DatagramPacket(buffer, buffer.length);
+                    socket.receive(dp);
+
+                    PacketReceiver.handle(dp);
+
                 } catch (IOException e) {
-                    if (running) System.err.println(e.getMessage());
+                    if (running)
+                        System.err.println(e.getMessage());
                 }
             }
+
+            System.out.println("[UDP] ReceiverThread beendet.");
         });
 
-        receiverThread.setDaemon(true);
         receiverThread.start();
     }
 
+
+    // ============================================================
+    // RETRANSMISSION LOOP
+    // ============================================================
     public void startRetransmissionLoop() {
-        Thread t = new Thread(() -> {
-            while (true) {
+
+        retransmissionThread = new Thread(() -> {
+
+            while (running) {
+
                 long now = System.currentTimeMillis();
 
                 for (var entry : PendingPackets.getPending().entrySet()) {
-                    int seq = entry.getKey();
-                    var pending = entry.getValue();
 
-                    if (now - pending.timestamp > 3000) {
-                        if (pending.attempts >= 3) {
-                            PendingPackets.clear(seq);
-                            continue;
-                        }
+                    int key = entry.getKey();
+                    var p = entry.getValue();
 
-                        try {
-                            InetAddress addr = InetAddress.getByName(IpUtil.intToIp(pending.destIp));
-                            sendPacket(pending.packet, addr, pending.destPort);
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
+                    if (now - p.timestamp < 3000)
+                        continue;
 
-                        pending.attempts++;
-                        pending.timestamp = now;
+                    if (p.attempts >= 3) {
+                        PendingPackets.clear(key);
+                        continue;
                     }
+
+                    try {
+                        InetAddress addr = InetAddress.getByName(
+                                IpUtil.intToIp(p.destIp)
+                        );
+
+                        if (p.isFrame) {
+
+                            if (p.missingChunks != null) {
+
+                                for (int miss : p.missingChunks) {
+                                    int idx = miss % p.frameChunks.length;
+                                    Packet resend = p.frameChunks[idx];
+                                    if (resend != null)
+                                        sendPacket(resend, addr, p.destPort);
+                                }
+
+                            } else {
+
+                                for (Packet fp : p.frameChunks) {
+                                    if (fp != null)
+                                        sendPacket(fp, addr, p.destPort);
+                                }
+                            }
+
+                        } else {
+
+                            sendPacket(p.singlePacket, addr, p.destPort);
+                        }
+
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
+
+                    p.attempts++;
+                    p.timestamp = now;
                 }
 
-                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(1000); }
+                catch (InterruptedException ignored) {}
             }
+
+            System.out.println("[UDP] RetransmissionThread beendet.");
         });
 
-        t.setDaemon(true);
-        t.start();
+        retransmissionThread.start();
     }
 
-    public void stop() {
-        running = false;
-        socket.close();
-    }
 
+    // ============================================================
+    // SEND (UNRELIABLE)
+    // ============================================================
     public void sendPacket(Packet p, InetAddress addr, int port) {
+
         byte[] data = p.toBytes();
+
         try {
             DatagramPacket dp = new DatagramPacket(data, data.length, addr, port);
             socket.send(dp);
+
         } catch (Exception e) {
             System.err.println(e.getMessage());
         }
     }
 
+
+    // ============================================================
+    // SEND (RELIABLE)
+    // ============================================================
     public void sendReliable(Packet p, String ip, int port) {
+
         try {
             InetAddress addr = InetAddress.getByName(ip);
+
             sendPacket(p, addr, port);
-            PendingPackets.track(p, IpUtil.ipToInt(ip), port);
+
+            PendingPackets.trackSingle(
+                    p,
+                    IpUtil.ipToInt(ip),
+                    port
+            );
+
         } catch (Exception e) {
             System.err.println(e.getMessage());
         }
     }
+
 
     public InetAddress socketAddressForIp(int ip) {
         try {
@@ -109,5 +175,30 @@ public class UdpSocket {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+
+    // ============================================================
+    // CLEAN SHUTDOWN
+    // ============================================================
+    public void stop() {
+
+        System.out.println("[UDP] Shutdown…");
+
+        running = false;
+
+        try { socket.close(); } catch (Exception ignored) {}
+
+        try {
+            if (receiverThread != null && receiverThread.isAlive())
+                receiverThread.join(250);
+        } catch (InterruptedException ignored) {}
+
+        try {
+            if (retransmissionThread != null && retransmissionThread.isAlive())
+                retransmissionThread.join(250);
+        } catch (InterruptedException ignored) {}
+
+        System.out.println("[UDP] gestoppt.");
     }
 }

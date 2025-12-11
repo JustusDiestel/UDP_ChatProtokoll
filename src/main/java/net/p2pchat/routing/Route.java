@@ -4,8 +4,10 @@ public class Route {
 
     public int destIp;
     public int destPort;
+
     public int nextHopIp;
     public int nextHopPort;
+
     public int distance;
 
     public Route(int destIp, int destPort, int nextHopIp, int nextHopPort, int distance) {
@@ -14,6 +16,14 @@ public class Route {
         this.nextHopIp = nextHopIp;
         this.nextHopPort = nextHopPort;
         this.distance = distance;
+    }
+
+    /**
+     * Wichtig für RoutingUpdateUtil.
+     * Erlaubt, das Objekt gefahrlos zu kopieren.
+     */
+    public Route copy() {
+        return new Route(destIp, destPort, nextHopIp, nextHopPort, distance);
     }
 
     @Override

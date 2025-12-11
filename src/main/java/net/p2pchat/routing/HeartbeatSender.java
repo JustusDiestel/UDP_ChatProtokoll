@@ -9,36 +9,33 @@ import java.net.InetAddress;
 
 public class HeartbeatSender {
 
-    private static final long INTERVAL = 20_000; // 20 Sekunden
+    private static final long INTERVAL = 5000; // 5 Sekunden laut Spezifikation
 
     public static void start() {
+
         Thread t = new Thread(() -> {
+
             while (true) {
 
-                for (var entry : NeighborManager.getAll().entrySet()) {
-                    Neighbor n = entry.getValue();
+                for (var entry : NeighborManager.getAliveNeighbors().entrySet()) {
 
-                    if (!n.alive)
-                        continue;
+                    Neighbor n = entry.getValue();
 
                     try {
                         int seq = NodeContext.seqGen.next();
 
                         Packet hb = PacketFactory.createHeartbeat(
                                 seq,
-                                NodeContext.localIp,
-                                n.ip
-                        );
-
-                        String ip = IpUtil.intToIp(n.ip);
-
-                        NodeContext.socket.sendPacket(
-                                hb,
-                                InetAddress.getByName(ip),
+                                n.ip,
                                 n.port
                         );
 
-                        System.out.println("HEART_BEAT → " + ip + ":" + n.port);
+                        InetAddress addr = InetAddress.getByName(IpUtil.intToIp(n.ip));
+
+                        NodeContext.socket.sendPacket(hb, addr, n.port);
+
+                        //System.out.println("HEARTBEAT → "
+                        //        + IpUtil.intToIp(n.ip) + ":" + n.port);
 
                     } catch (Exception e) {
                         System.err.println("Fehler beim Senden eines Heartbeats.");
@@ -47,6 +44,7 @@ public class HeartbeatSender {
 
                 try { Thread.sleep(INTERVAL); } catch (InterruptedException ignored) {}
             }
+
         });
 
         t.setDaemon(true);
