@@ -27,17 +27,24 @@ public class PacketReceiver {
     public static void handle(DatagramPacket packet) {
 
         int len = packet.getLength();
-        byte[] raw = Arrays.copyOfRange(packet.getData(),
+        byte[] raw = Arrays.copyOfRange(
+                packet.getData(),
                 packet.getOffset(),
-                packet.getOffset() + len);
+                packet.getOffset() + len
+        );
 
         PacketHeader header = PacketHeader.fromBytes(raw);
 
+        // ============================================================
+        // PORTS GEMÄSS SPEZIFIKATION:
+        // sourcePort      = Port des Absenders
+        // destinationPort = Port des Ziels
+        // ============================================================
         int senderIp   = header.sourceIp;
-        int senderPort = header.destinationPort & 0xFFFF;
+        int senderPort = header.sourcePort & 0xFFFF;
 
         int receiverIp   = header.destinationIp;
-        int receiverPort = header.sourcePort & 0xFFFF;
+        int receiverPort = header.destinationPort & 0xFFFF;
 
         NeighborManager.updateOrAdd(senderIp, senderPort);
 
@@ -48,8 +55,7 @@ public class PacketReceiver {
             return;
         }
 
-        byte[] payload =
-                Arrays.copyOfRange(raw, headerSize, headerSize + header.payloadLength);
+        byte[] payload = Arrays.copyOfRange(raw, headerSize, headerSize + header.payloadLength);
 
         boolean valid = Arrays.equals(HashUtil.sha256(payload), header.checksum);
         if (!valid) {
@@ -97,7 +103,6 @@ public class PacketReceiver {
             if (isNew) {
                 RoutingManager.broadcastRoutingUpdate();
             }
-
             return;
         }
 
@@ -139,8 +144,7 @@ public class PacketReceiver {
 
             if (receivedHistory.isDuplicate(senderIp, header.sequenceNumber)) {
                 Packet ack = PacketFactory.createAck(header.sequenceNumber, senderIp, senderPort);
-                NodeContext.socket.sendPacket(ack,
-                        packet.getAddress(), senderPort);
+                NodeContext.socket.sendPacket(ack, packet.getAddress(), senderPort);
                 return;
             }
 
@@ -148,9 +152,7 @@ public class PacketReceiver {
             System.out.println("MSG von " + IpUtil.intToIp(senderIp) + ":" + senderPort + " → " + msg);
 
             Packet ack = PacketFactory.createAck(header.sequenceNumber, senderIp, senderPort);
-            NodeContext.socket.sendPacket(ack,
-                    packet.getAddress(), senderPort);
-
+            NodeContext.socket.sendPacket(ack, packet.getAddress(), senderPort);
             return;
         }
 
@@ -164,7 +166,6 @@ public class PacketReceiver {
                             receiverPort == NodeContext.localPort;
 
             if (!isForMe) {
-
                 header.ttl--;
                 if (header.ttl <= 0) return;
 
@@ -188,28 +189,13 @@ public class PacketReceiver {
         // ============================================================
         if (header.type == 0x07) {
 
-            if (receivedHistory.isDuplicate(senderIp, header.sequenceNumber)) {
-                Packet ack = PacketFactory.createAck(header.sequenceNumber, senderIp, senderPort);
-                NodeContext.socket.sendPacket(ack,
-                        packet.getAddress(), senderPort);
-                return;
-            }
+            String filename = new String(payload, StandardCharsets.UTF_8);
 
-            ByteBuffer buf = ByteBuffer.wrap(payload);
-
-            int totalChunks = buf.getInt();
-            int nameLen = buf.getShort() & 0xFFFF;
-
-            byte[] nameBytes = new byte[nameLen];
-            buf.get(nameBytes);
-
-            String filename = new String(nameBytes, StandardCharsets.UTF_8);
-
-            ChunkAssembler.setFileInfo(header, totalChunks, filename);
+            // totalChunks kommt NICHT aus FILE_INFO, sondern aus FILE_CHUNK.header.chunkLength
+            ChunkAssembler.setFileInfo(header, filename);
 
             Packet ack = PacketFactory.createAck(header.sequenceNumber, senderIp, senderPort);
-            NodeContext.socket.sendPacket(ack,
-                    packet.getAddress(), senderPort);
+            NodeContext.socket.sendPacket(ack, packet.getAddress(), senderPort);
 
             return;
         }
@@ -225,7 +211,6 @@ public class PacketReceiver {
                 RoutingTable.addOrUpdate(new Route(senderIp, senderPort, senderIp, senderPort, 1));
                 RoutingManager.broadcastRoutingUpdate();
             }
-
             return;
         }
 
@@ -235,15 +220,14 @@ public class PacketReceiver {
         if (header.type == 0x09) {
 
             ByteBuffer buf = ByteBuffer.wrap(payload);
-
-            int entryCount = buf.getShort() & 0xFFFF;
+            int count = buf.getShort() & 0xFFFF;
 
             int nextHopIp   = senderIp;
             int nextHopPort = senderPort;
 
             boolean changed = false;
 
-            for (int i = 0; i < entryCount; i++) {
+            for (int i = 0; i < count; i++) {
 
                 int destIp   = buf.getInt();
                 int destPort = buf.getShort() & 0xFFFF;
@@ -258,8 +242,7 @@ public class PacketReceiver {
                 Route existing = RoutingTable.getRoute(destIp, destPort);
 
                 if (existing == null) {
-                    RoutingTable.addOrUpdate(
-                            new Route(destIp, destPort, nextHopIp, nextHopPort, newDist));
+                    RoutingTable.addOrUpdate(new Route(destIp, destPort, nextHopIp, nextHopPort, newDist));
                     changed = true;
                     continue;
                 }
@@ -271,11 +254,9 @@ public class PacketReceiver {
                     existing.nextHopIp = nextHopIp;
                     existing.nextHopPort = nextHopPort;
                     changed = true;
-                    continue;
                 }
 
-                if (existing.nextHopIp == nextHopIp &&
-                        existing.nextHopPort == nextHopPort) {
+                if (existing.nextHopIp == nextHopIp && existing.nextHopPort == nextHopPort) {
                     existing.distance = newDist;
                     changed = true;
                 }

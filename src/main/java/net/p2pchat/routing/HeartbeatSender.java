@@ -24,25 +24,26 @@ public class HeartbeatSender {
                     try {
                         int seq = NodeContext.seqGen.next();
 
+                        // HEARTBEAT-Paket ERZEUGEN (korrekte Header-Felder in PacketFactory!)
                         Packet hb = PacketFactory.createHeartbeat(
                                 seq,
                                 n.ip,
                                 n.port
                         );
 
-                        InetAddress addr = InetAddress.getByName(IpUtil.intToIp(n.ip));
+                        InetAddress addr = InetAddress.getByName(
+                                IpUtil.intToIp(n.ip)
+                        );
 
                         NodeContext.socket.sendPacket(hb, addr, n.port);
-
-                        //System.out.println("HEARTBEAT → "
-                        //        + IpUtil.intToIp(n.ip) + ":" + n.port);
 
                     } catch (Exception e) {
                         System.err.println("Fehler beim Senden eines Heartbeats.");
                     }
                 }
 
-                try { Thread.sleep(INTERVAL); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(INTERVAL); }
+                catch (InterruptedException ignored) {}
             }
 
         });
