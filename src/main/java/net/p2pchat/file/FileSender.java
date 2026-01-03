@@ -36,6 +36,7 @@ public class FileSender {
                 fileSeq,
                 destIp,
                 destPort,
+                totalChunks,
                 filename
         );
         NodeContext.socket.sendReliable(info, nextHop, route.nextHopPort);

@@ -92,8 +92,13 @@ public class UdpSocket {
                             if (p.missingChunks != null) {
 
                                 for (int miss : p.missingChunks) {
-                                    int idx = miss % p.frameChunks.length;
-                                    Packet resend = p.frameChunks[idx];
+                                    Packet resend = null;
+                                    for (Packet fp : p.frameChunks) {
+                                        if (fp != null && fp.header.chunkId == miss) {
+                                            resend = fp;
+                                            break;
+                                        }
+                                    }
                                     if (resend != null)
                                         sendPacket(resend, addr, p.destPort);
                                 }

@@ -82,15 +82,19 @@ public class PacketFactory {
         return new Packet(h, data);
     }
 
-    // SPEZIFIKATION: payload = NUR filename
-    public static Packet createFileInfo(int seq, int destIp, int destPort, String filename) {
+    public static Packet createFileInfo(int seq, int destIp, int destPort,
+                                        int totalChunks, String filename) {
 
-        byte[] payload = filename.getBytes(StandardCharsets.UTF_8);
+        byte[] nameBytes = filename.getBytes(StandardCharsets.UTF_8);
 
-        PacketHeader h = base((byte)0x07, seq, destIp, destPort, payload.length);
-        h.computeChecksum(payload);
+        PacketHeader h = base((byte)0x07, seq, destIp, destPort, nameBytes.length);
 
-        return new Packet(h, payload);
+        h.chunkId = 0;                 // immer 0
+        h.chunkLength = totalChunks;   // WICHTIG: Gesamtanzahl der Chunks
+
+        h.computeChecksum(nameBytes);
+
+        return new Packet(h, nameBytes);
     }
 
     public static Packet createHeartbeat(int seq, int destIp, int destPort) {

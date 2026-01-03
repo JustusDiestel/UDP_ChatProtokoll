@@ -37,6 +37,9 @@ public class ChunkAssembler {
         FileBuffer fb = files.computeIfAbsent(key, __ -> new FileBuffer());
 
         fb.filename = filename;
+
+        // WICHTIG: Gesamtanzahl der Chunks aus dem HEADER übernehmen
+        fb.totalChunks = header.chunkLength;
     }
 
     // ============================================================
