@@ -12,126 +12,111 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class ChunkAssembler {
 
-    private static class FileBuffer {
-        int totalChunks = -1;
-        String filename = "received.bin";
+    private static final int FRAME_SIZE = 128;
+
+    private static class Frame {
+        int expected;
         Map<Integer, byte[]> chunks = new ConcurrentHashMap<>();
     }
 
-    private static final Map<String, FileBuffer> files = new ConcurrentHashMap<>();
-
-    // ============================================================
-    // Eindeutige Key:
-    //   sourceIp + ":" + sourcePort   (Absender bestimmt Datei!)
-    // ============================================================
-    private static String fileKey(PacketHeader h) {
-        return h.sourceIp + ":" + (h.sourcePort & 0xFFFF);
+    private static class FileBuffer {
+        String filename;
+        int totalChunks;
+        Map<Integer, Frame> frames = new ConcurrentHashMap<>();
     }
 
-    // ============================================================
-    // FILE_INFO EMPFANGEN
-    // ============================================================
-    public static void setFileInfo(PacketHeader header, String filename) {
+    private static final Map<Integer, FileBuffer> files = new ConcurrentHashMap<>();
 
-        String key = header.sourceIp + ":" + header.sourcePort;
-        FileBuffer fb = files.computeIfAbsent(key, __ -> new FileBuffer());
-
+    // ================= FILE_INFO =================
+    public static void setFileInfo(PacketHeader h, String filename) {
+        FileBuffer fb = new FileBuffer();
         fb.filename = filename;
-
-        // WICHTIG: Gesamtanzahl der Chunks aus dem HEADER übernehmen
-        fb.totalChunks = header.chunkLength;
+        fb.totalChunks = h.chunkLength;
+        files.put(h.sequenceNumber, fb);
     }
 
-    // ============================================================
-    // EINEN FILE_CHUNK VERARBEITEN
-    // ============================================================
-    public static void receiveChunk(PacketHeader header, byte[] payload) {
+    // ================= FILE_CHUNK =================
+    public static void receiveChunk(PacketHeader h, byte[] payload) {
 
-        String k = fileKey(header);
-        FileBuffer fb = files.computeIfAbsent(k, __ -> new FileBuffer());
+        FileBuffer fb = files.get(h.sequenceNumber);
+        if (fb == null) return;
 
-        // Falls FILE_INFO noch nicht erhalten wurde
-        if (fb.totalChunks == -1) {
-            fb.totalChunks = header.chunkLength;
-        }
+        int frameIndex = h.chunkId / FRAME_SIZE;
+        int frameStart = frameIndex * FRAME_SIZE;
+        int frameEnd = Math.min(frameStart + FRAME_SIZE, fb.totalChunks);
 
-        fb.chunks.put(header.chunkId, payload);
+        Frame frame = fb.frames.computeIfAbsent(frameIndex, __ -> {
+            Frame f = new Frame();
+            f.expected = frameEnd - frameStart;
+            return f;
+        });
 
-        // ========================================================
-        // FERTIG?
-        // ========================================================
-        if (fb.chunks.size() == fb.totalChunks) {
+        frame.chunks.put(h.chunkId, payload);
 
-            byte[] data = mergeChunks(fb);
+        if (frame.chunks.size() < frame.expected) return;
 
-            try {
-                Files.write(Paths.get(fb.filename), data);
-            } catch (IOException ignored) {}
-
-            // ACK zurück an Sender senden:
-            //   → destIp = header.sourceIp
-            //   → destPort = header.sourcePort
-            var ack = PacketFactory.createAck(
-                    header.sequenceNumber,
-                    header.sourceIp,
-                    header.sourcePort & 0xFFFF
-            );
-
-            NodeContext.socket.sendPacket(
-                    ack,
-                    NodeContext.socket.socketAddressForIp(header.sourceIp),
-                    header.sourcePort & 0xFFFF
-            );
-
-            files.remove(k);
-            return;
-        }
-
-        // ========================================================
-        // MISSING LIST ERSTELLEN
-        // ========================================================
         List<Integer> missing = new ArrayList<>();
-        for (int i = 0; i < fb.totalChunks; i++) {
-            if (!fb.chunks.containsKey(i)) missing.add(i);
+        for (int i = frameStart; i < frameEnd; i++) {
+            if (!frame.chunks.containsKey(i))
+                missing.add(i);
         }
 
-        if (missing.isEmpty()) return;
+        if (missing.isEmpty()) {
+            sendAck(h);
+            if (allFramesComplete(fb))
+                writeFile(fb);
+        } else {
+            sendNoAck(h, missing);
+        }
+    }
 
-        int[] missingArr = missing.stream().mapToInt(x -> x).toArray();
+    private static boolean allFramesComplete(FileBuffer fb) {
+        int frames = (int) Math.ceil(fb.totalChunks / (double) FRAME_SIZE);
+        for (int i = 0; i < frames; i++) {
+            Frame f = fb.frames.get(i);
+            if (f == null || f.chunks.size() != f.expected)
+                return false;
+        }
+        return true;
+    }
 
-        // NO_ACK zurück an Absender → MUSS an (sourceIp, sourcePort)
-        var noAck = PacketFactory.createNoAck(
-                header.sequenceNumber,
-                header.sourceIp,
-                header.sourcePort & 0xFFFF,
-                missingArr
-        );
-
+    private static void sendAck(PacketHeader h) {
         NodeContext.socket.sendPacket(
-                noAck,
-                NodeContext.socket.socketAddressForIp(header.sourceIp),
-                header.sourcePort & 0xFFFF
+                PacketFactory.createAck(h.sequenceNumber, h.sourceIp, h.sourcePort & 0xFFFF),
+                NodeContext.socket.socketAddressForIp(h.sourceIp),
+                h.sourcePort & 0xFFFF
         );
     }
 
-    // ============================================================
-    // CHUNKS ZUSAMMENBAUEN
-    // ============================================================
-    private static byte[] mergeChunks(FileBuffer fb) {
+    private static void sendNoAck(PacketHeader h, List<Integer> missing) {
+        NodeContext.socket.sendPacket(
+                PacketFactory.createNoAck(
+                        h.sequenceNumber,
+                        h.sourceIp,
+                        h.sourcePort & 0xFFFF,
+                        missing.stream().mapToInt(i -> i).toArray()
+                ),
+                NodeContext.socket.socketAddressForIp(h.sourceIp),
+                h.sourcePort & 0xFFFF
+        );
+    }
 
-        int totalLen = fb.chunks.values().stream()
-                .mapToInt(c -> c.length)
-                .sum();
+    private static void writeFile(FileBuffer fb) {
+        try {
+            byte[] out = new byte[fb.frames.values().stream()
+                    .flatMap(f -> f.chunks.values().stream())
+                    .mapToInt(b -> b.length)
+                    .sum()];
 
-        byte[] out = new byte[totalLen];
-        int pos = 0;
+            int pos = 0;
+            for (int i = 0; i < fb.totalChunks; i++) {
+                Frame f = fb.frames.get(i / FRAME_SIZE);
+                byte[] c = f.chunks.get(i);
+                System.arraycopy(c, 0, out, pos, c.length);
+                pos += c.length;
+            }
 
-        for (int i = 0; i < fb.totalChunks; i++) {
-            byte[] c = fb.chunks.get(i);
-            System.arraycopy(c, 0, out, pos, c.length);
-            pos += c.length;
-        }
-
-        return out;
+            Files.write(Paths.get(fb.filename), out);
+        } catch (IOException ignored) {}
     }
 }

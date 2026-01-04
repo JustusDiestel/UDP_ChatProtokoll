@@ -1,35 +1,38 @@
 package net.p2pchat.util;
 
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ReceivedHistory {
 
-    private static final int MAX_HISTORY = 4096; // Rolling Window Größe
-    private static final int TRIM_SIZE   = 2048; // Nach dem Halbieren stabil
+    private static final int MAX_HISTORY = 4096;
+    private static final int TRIM_SIZE   = 2048;
 
-    // SourceIP → Set der letzten SeqNums
-    private final ConcurrentHashMap<Integer, Set<Integer>> history = new ConcurrentHashMap<>();
+    // Key = "sourceIp:sourcePort"
+    private final ConcurrentHashMap<String, Set<Integer>> history =
+            new ConcurrentHashMap<>();
 
+    private static String key(int ip, int port) {
+        return ip + ":" + port;
+    }
 
-    public boolean isDuplicate(int sourceIp, int seq) {
+    public boolean isDuplicate(int sourceIp, int sourcePort, int seq) {
 
-        // Thread-safe Set pro IP
+        String k = key(sourceIp, sourcePort);
+
         Set<Integer> set = history.computeIfAbsent(
-                sourceIp,
+                k,
                 __ -> Collections.newSetFromMap(new ConcurrentHashMap<>())
         );
 
-        // Wenn bereits gesehen → Duplikat
-        if (set.contains(seq)) {
+        // Bereits gesehen → Duplikat
+        if (!set.add(seq)) {
             return true;
         }
 
-        // Neu → speichern
-        set.add(seq);
-
-        // Rolling Window Begrenzung
+        // Rolling Window begrenzen
         if (set.size() > MAX_HISTORY) {
             trim(set);
         }
@@ -37,22 +40,15 @@ public class ReceivedHistory {
         return false;
     }
 
-
-    /**
-     * Entfernt ungefähr die Hälfte der Elemente aus dem Set.
-     * Motivation:
-     * - Speicherverbrauch bleibt O(MAX_HISTORY)
-     * - Duplikaterkennung bleibt zuverlässig
-     */
     private void trim(Set<Integer> set) {
 
+        Iterator<Integer> it = set.iterator();
         int removed = 0;
 
-        for (Integer num : set) {
-            set.remove(num);
+        while (it.hasNext() && removed < TRIM_SIZE) {
+            it.next();
+            it.remove();
             removed++;
-
-            if (removed >= TRIM_SIZE) break;
         }
     }
 }

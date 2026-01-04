@@ -16,7 +16,7 @@ public class Main {
     public static void main(String[] args) throws Exception {
 
         if (args.length < 1) {
-            System.out.println("Usage: java -jar p2p.jar <port>");
+            System.out.println("Usage: java -Dexec.mainClass=\"net.p2pchat.Main\" -Dexec.args=\"<PORT>\"");
             return;
         }
 
@@ -69,10 +69,6 @@ public class Main {
                 String ip = p[1];
                 int port = Integer.parseInt(p[2]);
                 int destIp = IpUtil.ipToInt(ip);
-
-                NeighborManager.updateOrAdd(destIp, port);
-                RoutingTable.addOrUpdate(new Route(destIp, port, destIp, port, 1));
-                RoutingManager.broadcastRoutingUpdate();
 
                 var hello = PacketFactory.createHello(
                         NodeContext.seqGen.next(),

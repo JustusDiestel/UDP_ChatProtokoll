@@ -7,117 +7,92 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class PendingPackets {
 
-    // ============================================================
-    // Datenstruktur eines Pending-Eintrags
-    // ============================================================
     public static class Pending {
 
-        // FRAME-MODUS (FileTransfer)
-        public Packet[] frameChunks;          // alle Chunks eines Frames
-        public int frameSeq;                  // sequenceNumber des ERSTEN Chunks
-        public int[] missingChunks;           // vom NO_ACK gesetzt
+        // FRAME
+        public Packet[] frameChunks;
+        public int sequenceNumber;   // Datei-ID
+        public int frameIndex;       // chunkId / 128
+        public int[] missingChunks;
 
-        // SINGLE-PACKET-MODUS (MSG, FILE_INFO)
+        // SINGLE
         public Packet singlePacket;
 
-        // Gemeinsame Infos
+        // META
         public long timestamp;
         public int attempts;
-
         public int destIp;
         public int destPort;
-
         public boolean isFrame;
 
-        // ========================================================
-        // Constructor SINGLE PACKET
-        // ========================================================
+        // SINGLE
         public Pending(Packet p, int destIp, int destPort) {
             this.singlePacket = p;
+            this.sequenceNumber = p.header.sequenceNumber;
+            this.frameIndex = -1;
+            this.destIp = destIp;
+            this.destPort = destPort;
             this.isFrame = false;
-
-            this.destIp = destIp;
-            this.destPort = destPort;
-
             this.timestamp = System.currentTimeMillis();
             this.attempts = 1;
         }
 
-        // ========================================================
-        // Constructor FRAME
-        // ========================================================
-        public Pending(Packet[] frameChunks, int frameSeq, int destIp, int destPort) {
-
-            this.frameChunks = frameChunks;
-            this.frameSeq = frameSeq;
-
+        // FRAME
+        public Pending(Packet[] chunks, int seq, int frameIndex, int destIp, int destPort) {
+            this.frameChunks = chunks;
+            this.sequenceNumber = seq;
+            this.frameIndex = frameIndex;
+            this.destIp = destIp;
+            this.destPort = destPort;
             this.isFrame = true;
-
-            this.destIp = destIp;
-            this.destPort = destPort;
-
             this.timestamp = System.currentTimeMillis();
             this.attempts = 1;
-
-            this.missingChunks = null;
         }
     }
 
-    // ============================================================
-    // ZENTRALE Pending-Liste:
-    //
-    // key = sequenceNumber ODER frameSeq
-    // ============================================================
-    private static final Map<Integer, Pending> pending = new ConcurrentHashMap<>();
+    private static long key(int seq, int frameIndex) {
+        return (((long) seq) << 32) | (frameIndex & 0xffffffffL);
+    }
 
+    private static final Map<Long, Pending> pending = new ConcurrentHashMap<>();
 
-    // ============================================================
-    // TRACK SINGLE PACKET (MSG, FILE_INFO)
-    // ============================================================
+    // ================= SINGLE =================
     public static void trackSingle(Packet p, int destIp, int destPort) {
-        pending.put(
-                p.header.sequenceNumber,
-                new Pending(p, destIp, destPort)
-        );
+        pending.put(key(p.header.sequenceNumber, -1),
+                new Pending(p, destIp, destPort));
     }
 
-
-    // ============================================================
-    // TRACK FRAME (StartSeq + 128 Chunks)
-    // ============================================================
-    public static void trackFrame(Packet[] frameChunks, int frameSeq, int destIp, int destPort) {
-        pending.put(
-                frameSeq,
-                new Pending(frameChunks, frameSeq, destIp, destPort)
-        );
+    public static void clearSingle(int sequenceNumber) {
+        pending.remove(key(sequenceNumber, -1));
     }
 
+    // ================= FRAME =================
+    public static void trackFrame(Packet[] frameChunks,
+                                  int sequenceNumber,
+                                  int frameIndex,
+                                  int destIp,
+                                  int destPort) {
 
-    // ============================================================
-    // ACK löschen
-    // ============================================================
-    public static void clear(int seq) {
-        pending.remove(seq);
+        pending.put(key(sequenceNumber, frameIndex),
+                new Pending(frameChunks, sequenceNumber, frameIndex, destIp, destPort));
     }
 
+    public static void clearFrame(int sequenceNumber, int frameIndex) {
+        pending.remove(key(sequenceNumber, frameIndex));
+    }
 
-    // ============================================================
-    // NO_ACK → fehlende Chunks setzen + Timer resetten
-    // ============================================================
-    public static void updateMissingChunks(int frameSeq, int[] missing) {
+    public static void updateMissingChunks(int sequenceNumber,
+                                           int frameIndex,
+                                           int[] missing) {
 
-        Pending p = pending.get(frameSeq);
+        Pending p = pending.get(key(sequenceNumber, frameIndex));
         if (p == null || !p.isFrame) return;
 
         p.missingChunks = missing;
-        p.timestamp = System.currentTimeMillis();  // wichtig
+        p.timestamp = System.currentTimeMillis();
     }
 
-
-    // ============================================================
-    // Zugriff
-    // ============================================================
-    public static Map<Integer, Pending> getPending() {
+    public static Map<Long, Pending> getPending() {
         return pending;
     }
 }

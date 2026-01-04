@@ -3,13 +3,10 @@ package net.p2pchat.routing;
 import net.p2pchat.NodeContext;
 import net.p2pchat.model.Packet;
 import net.p2pchat.protocol.PacketFactory;
-import net.p2pchat.util.IpUtil;
-
-import java.net.InetAddress;
 
 public class HeartbeatSender {
 
-    private static final long INTERVAL = 5000; // 5 Sekunden laut Spezifikation
+    private static final long INTERVAL = 5000; // 5 Sekunden
 
     public static void start() {
 
@@ -17,35 +14,29 @@ public class HeartbeatSender {
 
             while (true) {
 
-                for (var entry : NeighborManager.getAliveNeighbors().entrySet()) {
+                for (Neighbor n : NeighborManager.getAll().values()) {
 
-                    Neighbor n = entry.getValue();
+                    if (!n.alive) continue;
 
-                    try {
-                        int seq = NodeContext.seqGen.next();
+                    int seq = NodeContext.seqGen.next();
 
-                        // HEARTBEAT-Paket ERZEUGEN (korrekte Header-Felder in PacketFactory!)
-                        Packet hb = PacketFactory.createHeartbeat(
-                                seq,
-                                n.ip,
-                                n.port
-                        );
+                    Packet hb = PacketFactory.createHeartbeat(
+                            seq,
+                            n.ip,
+                            n.port
+                    );
 
-                        InetAddress addr = InetAddress.getByName(
-                                IpUtil.intToIp(n.ip)
-                        );
-
-                        NodeContext.socket.sendPacket(hb, addr, n.port);
-
-                    } catch (Exception e) {
-                        System.err.println("Fehler beim Senden eines Heartbeats.");
-                    }
+                    NodeContext.socket.sendPacket(
+                            hb,
+                            NodeContext.socket.socketAddressForIp(n.ip),
+                            n.port
+                    );
                 }
 
-                try { Thread.sleep(INTERVAL); }
-                catch (InterruptedException ignored) {}
+                try {
+                    Thread.sleep(INTERVAL);
+                } catch (InterruptedException ignored) {}
             }
-
         });
 
         t.setDaemon(true);

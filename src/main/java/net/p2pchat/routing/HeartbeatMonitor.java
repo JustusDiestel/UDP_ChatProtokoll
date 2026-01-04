@@ -3,7 +3,7 @@ package net.p2pchat.routing;
 public class HeartbeatMonitor {
 
     // Spezifikation: Timeout = 2 * HB-Interval + 1000 ms
-    private static final long HEARTBEAT_INTERVAL = 5000;          // 5 Sekunden
+    private static final long HEARTBEAT_INTERVAL = 5000;               // 5 Sekunden
     private static final long TIMEOUT = HEARTBEAT_INTERVAL * 2 + 1000; // 11000 ms
 
     public static void start() {
@@ -18,7 +18,7 @@ public class HeartbeatMonitor {
 
                     Neighbor n = entry.getValue();
 
-                    // Wenn Nachbar lebend ist, aber Timeouts überschritten wurden
+                    // Nachbar war lebend, ist jetzt aber timeoutet
                     if (n.alive && (now - n.lastHeard > TIMEOUT)) {
 
                         n.alive = false;
@@ -29,15 +29,24 @@ public class HeartbeatMonitor {
                                         + " | lastHeard=" + (now - n.lastHeard) + "ms"
                         );
 
-                        // Routen entfernen
-                        RoutingTable.removeVia(n.ip, n.port);
+                        // ===== WICHTIGER FIX =====
 
-                        // Routing-Update broadcasten
-                        RoutingManager.broadcastRoutingUpdate();
+                        // 1. direkte Route (dist = 1) entfernen
+                        RoutingTable.removeDestination(n.ip, n.port);
+
+                        // 2. alle indirekten Routen über diesen Nachbarn entfernen
+                        boolean changed = RoutingTable.removeVia(n.ip, n.port);
+
+                        // 3. Routing-Update nur senden, wenn sich etwas geändert hat
+                        if (changed) {
+                            RoutingManager.broadcastRoutingUpdate();
+                        }
                     }
                 }
 
-                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ignored) {}
             }
 
         });

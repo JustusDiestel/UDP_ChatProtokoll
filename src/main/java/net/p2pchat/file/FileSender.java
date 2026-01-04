@@ -12,26 +12,23 @@ import java.util.List;
 
 public class FileSender {
 
+    private static final int FRAME_SIZE = 128;
+
     public static void sendFile(byte[] data, int destIp, int destPort, String path) {
 
         var route = RoutingManager.getRoute(destIp, destPort);
-        if (route == null) {
-            System.out.println("Keine Route.");
-            return;
-        }
+        if (route == null) return;
 
         String nextHop = IpUtil.intToIp(route.nextHopIp);
-
         String filename = Paths.get(path).getFileName().toString();
+
         List<byte[]> chunks = Chunker.split(data);
         int totalChunks = chunks.size();
 
-        // ============================================================
-        // 1) EINE seqNr für FILE_INFO + ALLE Chunks
-        // ============================================================
+        // ===== EINE SequenceNumber für die GESAMTE DATEI =====
         int fileSeq = NodeContext.seqGen.next();
 
-        // FILE_INFO senden (reliable)
+        // ---------------- FILE_INFO ----------------
         Packet info = PacketFactory.createFileInfo(
                 fileSeq,
                 destIp,
@@ -39,51 +36,48 @@ public class FileSender {
                 totalChunks,
                 filename
         );
+
         NodeContext.socket.sendReliable(info, nextHop, route.nextHopPort);
 
-        System.out.println("FILE_INFO seq=" + fileSeq + " → " + filename);
+        // ---------------- FRAMES ----------------
+        int chunkIndex = 0;
 
-        final int FRAME_SIZE = 128;
-        int currentChunk = 0;
+        while (chunkIndex < totalChunks) {
 
-        while (currentChunk < totalChunks) {
-
-            int remaining = totalChunks - currentChunk;
-            int count = Math.min(FRAME_SIZE, remaining);
-
+            int count = Math.min(FRAME_SIZE, totalChunks - chunkIndex);
             Packet[] framePackets = new Packet[count];
 
+            int frameIndex = chunkIndex / FRAME_SIZE;
+
             for (int i = 0; i < count; i++) {
-
-                int chunkId = currentChunk + i;
-                byte[] chunkData = chunks.get(chunkId);
-
-                Packet p = PacketFactory.createFileChunk(
-                        fileSeq,           // ALLE Frames + FILE_INFO = gleiche seq
+                int chunkId = chunkIndex + i;
+                framePackets[i] = PacketFactory.createFileChunk(
+                        fileSeq,                 // ✅ GLEICHE SequenceNumber
                         destIp,
                         destPort,
                         chunkId,
                         totalChunks,
-                        chunkData
+                        chunks.get(chunkId)
                 );
-
-                framePackets[i] = p;
             }
 
-            PendingPackets.trackFrame(framePackets, fileSeq, destIp, destPort);
+            PendingPackets.trackFrame(
+                    framePackets,
+                    fileSeq,
+                    frameIndex,
+                    destIp,
+                    destPort
+            );
 
-            for (Packet fp : framePackets) {
+            for (Packet p : framePackets) {
                 NodeContext.socket.sendPacket(
-                        fp,
+                        p,
                         NodeContext.socket.socketAddressForIp(route.nextHopIp),
                         route.nextHopPort
                 );
             }
 
-            System.out.println("Frame gesendet: seq=" + fileSeq +
-                    " | chunks=" + count + " | start=" + currentChunk);
-
-            currentChunk += count;
+            chunkIndex += count;
         }
     }
 }

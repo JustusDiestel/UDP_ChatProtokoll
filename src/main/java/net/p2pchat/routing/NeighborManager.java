@@ -1,5 +1,6 @@
 package net.p2pchat.routing;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -11,44 +12,36 @@ public class NeighborManager {
         return ip + ":" + port;
     }
 
-    /**
-     * Wird bei JEDEM eingehenden Paket aufgerufen.
-     * Dient als Heartbeat-Ersatz (Erreichen des Nachbarn).
-     */
-    public static void updateOrAdd(int ip, int port) {
+    public static boolean updateOrAdd(int ip, int port) {
         String k = key(ip, port);
+        Neighbor before = neighbors.get(k);
 
         neighbors.compute(k, (__, old) -> {
-            if (old == null) {
-                System.out.println("Neuer Nachbar: " + k);
-                return new Neighbor(ip, port);
-            }
-
-            if (!old.alive) {
-                System.out.println("Nachbar wieder aktiv: " + k);
-                old.alive = true;
-            }
-
+            if (old == null) return new Neighbor(ip, port);
             old.updateLastHeard();
             return old;
         });
+
+        Neighbor after = neighbors.get(k);
+        if (before == null) {
+            System.out.println("Neuer Nachbar: " + k);
+            return true;
+        }
+
+        if (!before.alive && after.alive) {
+            System.out.println("Nachbar wieder aktiv: " + k);
+            return true;
+        }
+
+        return false;
     }
 
-    /**
-     * Vom HeartbeatMonitor benutzt.
-     */
     public static void markDead(int ip, int port) {
-        String k = key(ip, port);
-        Neighbor n = neighbors.get(k);
-
+        Neighbor n = neighbors.get(key(ip, port));
         if (n != null && n.alive) {
             n.markDead();
-            System.out.println("Nachbar tot: " + k);
+            System.out.println("Nachbar tot: " + ip + ":" + port);
         }
-    }
-
-    public static boolean isNeighbor(int ip, int port) {
-        return neighbors.containsKey(key(ip, port));
     }
 
     public static boolean isAlive(int ip, int port) {
@@ -56,15 +49,11 @@ public class NeighborManager {
         return n != null && n.alive;
     }
 
-    public static Map<String, Neighbor> getAll() {
-        return neighbors;
+    public static Collection<Neighbor> values() {
+        return neighbors.values();
     }
 
-    public static Map<String, Neighbor> getAliveNeighbors() {
-        Map<String, Neighbor> alive = new ConcurrentHashMap<>();
-        for (var e : neighbors.entrySet()) {
-            if (e.getValue().alive) alive.put(e.getKey(), e.getValue());
-        }
-        return alive;
+    public static Map<String, Neighbor> getAll() {
+        return neighbors;
     }
 }
