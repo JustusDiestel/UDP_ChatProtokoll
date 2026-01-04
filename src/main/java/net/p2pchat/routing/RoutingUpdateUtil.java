@@ -38,24 +38,26 @@ public class RoutingUpdateUtil {
                     r.destPort == NodeContext.localPort)
                 continue;
 
-            // Split Horizon + Poison Reverse
-            if (r.nextHopIp == neighborIp && r.nextHopPort == neighborPort) {
+            // Split Horizon (Poison Reverse intern verwendet, aber keine 255-Updates)
+            if (r.nextHopIp == neighborIp &&
+                r.nextHopPort == neighborPort) {
+                continue;
+            }
 
-                Route poisoned = new Route(
-                        r.destIp,
-                        r.destPort,
-                        r.nextHopIp,
-                        r.nextHopPort,
-                        255   // Poison Reverse
-                );
-
-                filtered.add(poisoned);
+            // Unreachable Routen niemals announcen
+            if (r.distance >= 255) {
                 continue;
             }
 
             // Normale Route
-            int dist = Math.min(r.distance, 255);
-            filtered.add(new Route(r.destIp, r.destPort, r.nextHopIp, r.nextHopPort, dist));
+            int dist = Math.min(r.distance, 254);
+            filtered.add(new Route(
+                    r.destIp,
+                    r.destPort,
+                    r.nextHopIp,
+                    r.nextHopPort,
+                    dist
+            ));
         }
 
         // Payload erstellen

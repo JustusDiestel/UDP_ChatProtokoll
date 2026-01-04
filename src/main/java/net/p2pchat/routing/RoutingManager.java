@@ -25,7 +25,7 @@ public class RoutingManager {
             try {
                 // Payload mit Split Horizon / Poison Reverse
                 byte[] payload = RoutingUpdateUtil.buildPayloadForNeighbor(n.ip, n.port);
-
+                if (payload.length == 0) continue;
                 int seq = NodeContext.seqGen.next();
 
                 Packet update = PacketFactory.createRoutingUpdate(
