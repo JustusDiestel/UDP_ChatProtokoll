@@ -5,8 +5,8 @@ import java.util.List;
 
 public class Chunker {
 
-    // Spezifikation: CHUNK_SIZE = 1000 Bytes
-    public static final int CHUNK_SIZE = 1000;
+    // Spezifikation: CHUNK_SIZE = 1260 Bytes
+    public static final int CHUNK_SIZE = 1260;
 
     /**
      * Teilt ein Byte-Array in 1000-Byte Chunks.

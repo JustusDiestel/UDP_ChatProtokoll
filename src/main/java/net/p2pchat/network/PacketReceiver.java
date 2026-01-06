@@ -60,7 +60,18 @@ public class PacketReceiver {
 
         // ===================== ACK =====================
         if (header.type == 0x01) {
-            PendingPackets.clearSingle(header.sequenceNumber);
+
+            int seq = header.sequenceNumber;
+
+            // 1) Alle FILE-Frames dieser Datei als bestätigt entfernen
+            PendingPackets.getPending().entrySet().removeIf(e ->
+                    e.getValue().isFrame &&
+                            e.getValue().sequenceNumber == seq
+            );
+
+            // 2) Zusätzlich evtl. Single-Packets (FILE_INFO) entfernen
+            PendingPackets.clearSingle(seq);
+
             return;
         }
 

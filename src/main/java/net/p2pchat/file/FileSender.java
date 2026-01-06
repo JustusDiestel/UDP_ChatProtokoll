@@ -60,7 +60,6 @@ public class FileSender {
                         chunks.get(chunkId)
                 );
             }
-
             PendingPackets.trackFrame(
                     framePackets,
                     fileSeq,
