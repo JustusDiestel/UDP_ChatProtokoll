@@ -31,6 +31,7 @@ public class Main {
 
         HeartbeatSender.start();
         HeartbeatMonitor.start();
+        RoutingManager.startPeriodicUpdates(); // ← HIER
 
         System.out.println("Node gestartet auf " + localIpStr + ":" + NodeContext.localPort);
         System.out.println("Befehle:");

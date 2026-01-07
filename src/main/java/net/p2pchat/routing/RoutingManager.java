@@ -15,7 +15,23 @@ public class RoutingManager {
      * Für jeden Nachbarn wird ein EIGENES Payload generiert
      * (Split Horizon + Poison Reverse).
      */
-    public static volatile boolean topologyChanged = false;
+public static volatile boolean topologyChanged = false;
+
+    private static final long PERIODIC_UPDATE_INTERVAL = 5000; // ms
+
+    public static void startPeriodicUpdates() {
+        Thread t = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(PERIODIC_UPDATE_INTERVAL);
+                } catch (InterruptedException ignored) {}
+
+                broadcastRoutingUpdate();
+            }
+        });
+        t.setDaemon(true);
+        t.start();
+    }
 
     public static void broadcastRoutingUpdate() {
 
