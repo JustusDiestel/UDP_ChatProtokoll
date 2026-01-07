@@ -65,6 +65,9 @@ public class PacketReceiver {
         if (header.type == 0x01) {
 
             int seq = header.sequenceNumber;
+            int frameIndex = ByteBuffer.wrap(payload).getInt(); // Beispiel: ACK payload enthält frameIndex
+
+            PendingPackets.clearFrame(seq, frameIndex);
 
             PendingPackets.getPending().entrySet().removeIf(e ->
                     e.getValue().isFrame &&

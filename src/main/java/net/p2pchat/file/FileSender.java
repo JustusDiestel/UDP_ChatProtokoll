@@ -61,6 +61,12 @@ public class FileSender {
                 );
             }
 
+            System.out.println(
+                    "[FRAME START] seq=" + fileSeq +
+                            " frameIndex=" + frameIndex +
+                            " chunks=" + count
+            );
+
             PendingPackets.trackFrame(
                     framePackets,
                     fileSeq,

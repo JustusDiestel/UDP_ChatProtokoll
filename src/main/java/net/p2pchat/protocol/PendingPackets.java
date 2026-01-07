@@ -73,9 +73,22 @@ public class PendingPackets {
                                   int destIp,
                                   int destPort) {
 
-        pending.put(key(sequenceNumber, frameIndex),
-                new Pending(frameChunks, sequenceNumber, frameIndex, destIp, destPort));
+        long k = key(sequenceNumber, frameIndex);
+
+        pending.put(
+                k,
+                new Pending(frameChunks, sequenceNumber, frameIndex, destIp, destPort)
+        );
+
+        System.out.println(
+                "[PENDING ADD][FRAME] seq=" + sequenceNumber
+                        + " frame=" + frameIndex
+                        + " key=" + k
+                        + " chunks=" + frameChunks.length
+                        + " pendingSize=" + pending.size()
+        );
     }
+
 
     public static void clearFrame(int sequenceNumber, int frameIndex) {
         pending.remove(key(sequenceNumber, frameIndex));
