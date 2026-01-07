@@ -3,8 +3,8 @@ package net.p2pchat.routing;
 public class HeartbeatMonitor {
 
     // Spezifikation: Timeout = 2 * HB-Interval + 1000 ms
-    private static final long HEARTBEAT_INTERVAL = 5000;               // 5 Sekunden
-    private static final long TIMEOUT = HEARTBEAT_INTERVAL * 2 + 1000; // 11000 ms
+    private static final long HEARTBEAT_INTERVAL = 3000;               // 3 Sekunden
+    private static final long TIMEOUT = HEARTBEAT_INTERVAL * 2 + 1000; // 7000 ms
 
     public static void start() {
 
@@ -13,6 +13,7 @@ public class HeartbeatMonitor {
             while (true) {
 
                 long now = System.currentTimeMillis();
+                RoutingTable.cleanupPoisoned(now, HEARTBEAT_INTERVAL * 3);
 
                 for (var entry : NeighborManager.getAll().entrySet()) {
 

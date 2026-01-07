@@ -9,6 +9,7 @@ public class Route {
     public int nextHopPort;
 
     public int distance;
+    public volatile long poisonedAt = 0;
 
     public Route(int destIp, int destPort, int nextHopIp, int nextHopPort, int distance) {
         this.destIp = destIp;
@@ -23,7 +24,9 @@ public class Route {
      * Erlaubt, das Objekt gefahrlos zu kopieren.
      */
     public Route copy() {
-        return new Route(destIp, destPort, nextHopIp, nextHopPort, distance);
+        Route r = new Route(destIp, destPort, nextHopIp, nextHopPort, distance);
+        r.poisonedAt = this.poisonedAt;
+        return r;
     }
 
     @Override

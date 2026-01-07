@@ -3,6 +3,7 @@ package net.p2pchat.model;
 import net.p2pchat.util.HashUtil;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 
 public class PacketHeader {
@@ -43,6 +44,7 @@ public class PacketHeader {
     public byte[] toBytes() {
         ByteBuffer buf = ByteBuffer.allocate(HEADER_SIZE);
 
+        buf.order(ByteOrder.BIG_ENDIAN);
         buf.put(type);
         buf.putInt(sequenceNumber);
 
@@ -69,6 +71,7 @@ public class PacketHeader {
             throw new IllegalArgumentException("Header zu klein: " + bytes.length);
 
         ByteBuffer buf = ByteBuffer.wrap(bytes);
+        buf.order(ByteOrder.BIG_ENDIAN);
         PacketHeader h = new PacketHeader();
 
         h.type = buf.get();

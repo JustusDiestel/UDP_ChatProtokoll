@@ -43,7 +43,7 @@ public static volatile boolean topologyChanged = false;
             try {
                 // Payload mit Split Horizon / Poison Reverse
                 byte[] payload = RoutingUpdateUtil.buildPayloadForNeighbor(n.ip, n.port);
-                if (payload.length == 0) continue;
+                if (payload.length < 2) continue;
                 int seq = NodeContext.seqGen.next();
 
                 Packet update = PacketFactory.createRoutingUpdate(

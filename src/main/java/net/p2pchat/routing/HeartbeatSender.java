@@ -6,7 +6,7 @@ import net.p2pchat.protocol.PacketFactory;
 
 public class HeartbeatSender {
 
-    private static final long INTERVAL = 5000; // 5 Sekunden
+    private static final long INTERVAL = 3000; // 3 sec
 
     public static void start() {
 

@@ -7,15 +7,18 @@ Dies ist ein einfaches UDP-Chatprotokoll, das es Benutzern ermöglicht, Nachrich
 mvn compile exec:java -Dexec.mainClass=net.p2pchat.Main -Dexec.args="5000"
 mvn compile exec:java -Dexec.mainClass=net.p2pchat.Main -Dexec.args="5000 10.8.3.3"
 
-! den Port 5000 durch den gewünschten Port ersetzen.
 
 
-#Befehel
+
+
+# Befehle
+
 connect: connect 10.8.3.4 5000
-
 msg: msg 10.8.3.4 5000
+sendfile: sendfile 10.8.3.3 5003 src/testDateien/test3_justus_diestel.png
+            sendfile 10.8.3.3 5003 src/testDateien/test2_justus_diestel.png
 
-sendfile: sendfile 10.8.3.4 5000 
+
 
 
 Frage

@@ -59,8 +59,10 @@ public class RoutingTable {
                     old.nextHopPort == senderPort &&
                     old.distance != 1) {
 
-                routes.remove(k);
-                return true;
+                boolean changed = (old.distance != 255) || (old.poisonedAt == 0);
+                old.distance = 255;
+                old.poisonedAt = System.currentTimeMillis();
+                return changed;
             }
             return false;
         }
@@ -125,6 +127,16 @@ public class RoutingTable {
         });
 
         return routes.size() != before;
+    }
+
+    public static void cleanupPoisoned(long now, long poisonHoldMs) {
+        routes.entrySet().removeIf(e -> {
+            Route r = e.getValue();
+            if (r.distance < 255) return false;
+            if (r.distance == 1) return false;
+            if (r.poisonedAt == 0) return true;
+            return (now - r.poisonedAt) >= poisonHoldMs;
+        });
     }
 
 

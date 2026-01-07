@@ -9,7 +9,7 @@ public class Chunker {
     public static final int CHUNK_SIZE = 1260;
 
     /**
-     * Teilt ein Byte-Array in 1000-Byte Chunks.
+     * Teilt ein Byte-Array in 1260-Byte Chunks.
      */
     public static List<byte[]> split(byte[] file) {
 

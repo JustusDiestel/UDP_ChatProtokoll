@@ -79,6 +79,7 @@ public class RoutingUpdateUtil {
         int payloadSize = 2 + entryCount * 7;
 
         ByteBuffer buf = ByteBuffer.allocate(payloadSize);
+        buf.order(java.nio.ByteOrder.BIG_ENDIAN);
         buf.putShort((short) entryCount);
 
         for (Route r : filtered) {
