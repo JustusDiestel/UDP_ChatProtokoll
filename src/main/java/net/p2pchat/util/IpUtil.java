@@ -13,8 +13,17 @@ public class IpUtil {
      * - ansonsten VPN
      * - ansonsten loopback
      */
+    private static Integer manualLocalIp = null;
+
+    public static void setManualLocalIp(String ip) {
+        manualLocalIp = ipToInt(ip);
+    }
+
     public static int getLocalIpAsInt() {
 
+        if (manualLocalIp != null) {
+            return manualLocalIp;
+        }
         try {
             Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
 

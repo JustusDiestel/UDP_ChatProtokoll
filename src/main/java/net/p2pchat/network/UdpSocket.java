@@ -22,8 +22,13 @@ public class UdpSocket {
     public UdpSocket(int port) {
         this.port = port;
         try {
-            this.socket = new DatagramSocket(port);
-        } catch (SocketException e) {
+            InetAddress bindAddr =
+                    InetAddress.getByName(IpUtil.intToIp(NodeContext.localIp));
+
+            this.socket = new DatagramSocket(
+                    new InetSocketAddress(bindAddr, port)
+            );
+        } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }

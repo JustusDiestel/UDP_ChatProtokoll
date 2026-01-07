@@ -16,12 +16,20 @@ public class Main {
     public static void main(String[] args) throws Exception {
 
         if (args.length < 1) {
-            System.out.println("Usage: java -Dexec.mainClass=\"net.p2pchat.Main\" -Dexec.args=\"<PORT>\"");
+            System.out.println(
+                    "Usage: java -Dexec.mainClass=\"net.p2pchat.Main\" -Dexec.args=\"<PORT> [IP]\""
+            );
             return;
         }
 
+        // args: <PORT> [LOCAL_IP]
         NodeContext.localPort = Integer.parseInt(args[0]);
-        NodeContext.localIp = IpUtil.getLocalIpAsInt();
+
+        if (args.length >= 2) {
+            NodeContext.localIp = IpUtil.ipToInt(args[1]);
+        } else {
+            NodeContext.localIp = IpUtil.getLocalIpAsInt();
+        }
 
         String localIpStr = IpUtil.intToIp(NodeContext.localIp);
 
