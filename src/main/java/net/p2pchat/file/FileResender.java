@@ -32,7 +32,13 @@ public class FileResender {
         }
 
         for (int chunkId : missing) {
-            Packet pkt = p.frameChunks[chunkId % 128];
+
+            int localIndex = chunkId - (frameIndex * 128);
+
+            if (localIndex < 0 || localIndex >= p.frameChunks.length)
+                continue;
+
+            Packet pkt = p.frameChunks[localIndex];
             if (pkt != null) {
                 NodeContext.socket.sendPacket(pkt, nextHop, r.nextHopPort);
             }

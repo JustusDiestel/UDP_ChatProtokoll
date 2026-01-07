@@ -6,7 +6,7 @@ import net.p2pchat.protocol.PacketFactory;
 import net.p2pchat.protocol.PendingPackets;
 import net.p2pchat.routing.RoutingManager;
 import net.p2pchat.util.IpUtil;
-
+import net.p2pchat.protocol.PendingPackets;
 import java.nio.file.Paths;
 import java.util.List;
 
@@ -14,7 +14,7 @@ public class FileSender {
 
     private static final int FRAME_SIZE = 128;
 
-    public static void sendFile(byte[] data, int destIp, int destPort, String path) {
+    public static void sendFile(byte[] data, int destIp, int destPort, String path) throws InterruptedException {
 
         var route = RoutingManager.getRoute(destIp, destPort);
         if (route == null) return;
@@ -67,12 +67,12 @@ public class FileSender {
                             " chunks=" + count
             );
 
-            PendingPackets.trackFrame(
-                    framePackets,
-                    fileSeq,
-                    frameIndex,
-                    destIp,
-                    destPort
+            PendingPackets.trackFrame(framePackets, fileSeq, frameIndex, destIp, destPort);
+
+            System.out.println(
+                    "[PENDING CHECK] key=" +
+                            ((((long) fileSeq) << 32) | (frameIndex & 0xffffffffL)) +
+                            " pendingSize=" + PendingPackets.getPending().size()
             );
 
             for (Packet p : framePackets) {
@@ -83,10 +83,31 @@ public class FileSender {
                 );
             }
 
-            // ⛔ BLOCKIEREN BIS ACK DAS FRAME ENTFERNT
-            while (PendingPackets.getPending()
-                    .containsKey((((long) fileSeq) << 32) | (frameIndex & 0xffffffffL))) {
-                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+            int retries = 0;
+            long lastSend = System.currentTimeMillis();
+
+// ⛔ STOP-AND-WAIT: warte auf ACK(seq)
+            while (PendingPackets.hasFrame(fileSeq, frameIndex)) {
+                if (System.currentTimeMillis() - lastSend > 3000) {
+
+                    if (++retries > 3) {
+                        PendingPackets.dropFrame(fileSeq, frameIndex);
+                        return; // best effort → abbrechen
+                    }
+
+                    // Frame erneut senden
+                    for (Packet p : framePackets) {
+                        NodeContext.socket.sendPacket(
+                                p,
+                                NodeContext.socket.socketAddressForIp(route.nextHopIp),
+                                route.nextHopPort
+                        );
+                    }
+
+                    lastSend = System.currentTimeMillis();
+                }
+
+                Thread.sleep(10);
             }
 
             chunkIndex += count;

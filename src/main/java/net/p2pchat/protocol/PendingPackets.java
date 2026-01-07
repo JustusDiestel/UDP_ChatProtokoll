@@ -73,12 +73,14 @@ public class PendingPackets {
                                   int destIp,
                                   int destPort) {
 
-        long k = key(sequenceNumber, frameIndex);
-
-        pending.put(
-                k,
-                new Pending(frameChunks, sequenceNumber, frameIndex, destIp, destPort)
+        // SAFETY: alte Frames dieser Datei entfernen
+        pending.entrySet().removeIf(e ->
+                e.getValue().isFrame &&
+                        e.getValue().sequenceNumber == sequenceNumber
         );
+
+        long k = key(sequenceNumber, frameIndex);
+        pending.put(k, new Pending(frameChunks, sequenceNumber, frameIndex, destIp, destPort));
 
         System.out.println(
                 "[PENDING ADD][FRAME] seq=" + sequenceNumber
@@ -87,12 +89,19 @@ public class PendingPackets {
                         + " chunks=" + frameChunks.length
                         + " pendingSize=" + pending.size()
         );
+
     }
 
 
     public static void clearFrame(int sequenceNumber, int frameIndex) {
         pending.remove(key(sequenceNumber, frameIndex));
     }
+
+    public static boolean hasFrame(int sequenceNumber, int frameIndex) {
+        return pending.containsKey(key(sequenceNumber, frameIndex));
+    }
+
+
 
 
 
@@ -109,5 +118,19 @@ public class PendingPackets {
 
     public static Map<Long, Pending> getPending() {
         return pending;
+    }
+
+    public static void dropFrame(int sequenceNumber, int frameIndex) {
+
+        long key = (((long) sequenceNumber) << 32) | (frameIndex & 0xffffffffL);
+
+        Pending p = pending.remove(key);
+        if (p == null) return;
+
+        // Optional: Logging
+        System.out.println(
+                "[DROP FRAME] seq=" + sequenceNumber +
+                        " frameIndex=" + frameIndex
+        );
     }
 }

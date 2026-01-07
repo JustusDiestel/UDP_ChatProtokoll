@@ -63,20 +63,15 @@ public class PacketReceiver {
 
         // ===================== ACK =====================
         if (header.type == 0x01) {
-
+            if (header.payloadLength != 0) return;
             int seq = header.sequenceNumber;
-            int frameIndex = ByteBuffer.wrap(payload).getInt(); // Beispiel: ACK payload enthält frameIndex
 
-            PendingPackets.clearFrame(seq, frameIndex);
-
+            // gesamtes Frame dieser Datei bestätigt
             PendingPackets.getPending().entrySet().removeIf(e ->
-                    e.getValue().isFrame &&
-                            e.getValue().sequenceNumber == seq
+                    e.getValue().isFrame && e.getValue().sequenceNumber == seq
             );
 
-            // 2) Zusätzlich evtl. Single-Packets (FILE_INFO) entfernen
             PendingPackets.clearSingle(seq);
-
             return;
         }
 
@@ -103,6 +98,7 @@ public class PacketReceiver {
 
         // ===================== HELLO =====================
         if (header.type == 0x03) {
+            if (header.payloadLength != 0) return;
             RoutingTable.ensureDirectNeighbor(hopIp, hopPort);
             if (!wasAliveBefore) RoutingManager.broadcastRoutingUpdate();
             return;
@@ -110,6 +106,7 @@ public class PacketReceiver {
 
         // ===================== GOODBYE =====================
         if (header.type == 0x04) {
+            if (header.payloadLength != 0) return;
             NeighborManager.markDead(hopIp, hopPort);
             boolean changed = RoutingTable.removeVia(hopIp, hopPort);
             if (changed) RoutingManager.broadcastRoutingUpdate();
@@ -224,6 +221,7 @@ public class PacketReceiver {
 
         // ===================== HEARTBEAT =====================
         if (header.type == 0x08) {
+            if (header.payloadLength != 0) return;
             RoutingTable.ensureDirectNeighbor(hopIp, hopPort);
             if (!wasAliveBefore) RoutingManager.broadcastRoutingUpdate();
             return;
