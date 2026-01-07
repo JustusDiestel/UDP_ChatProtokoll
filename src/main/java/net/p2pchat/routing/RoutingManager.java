@@ -15,6 +15,8 @@ public class RoutingManager {
      * Für jeden Nachbarn wird ein EIGENES Payload generiert
      * (Split Horizon + Poison Reverse).
      */
+    public static volatile boolean topologyChanged = false;
+
     public static void broadcastRoutingUpdate() {
 
         for (Map.Entry<String, Neighbor> entry : NeighborManager.getAll().entrySet()) {
@@ -41,7 +43,7 @@ public class RoutingManager {
 
                 System.out.println("ROUTING_UPDATE → "
                         + IpUtil.intToIp(n.ip) + ":" + n.port
-                        + " | entries=" + (payload.length / 7));
+                        + " | entries=" + ((payload.length - 2) / 7));
 
             } catch (Exception e) {
                 System.err.println(
@@ -52,6 +54,8 @@ public class RoutingManager {
             }
         }
     }
+
+
 
 
     /**

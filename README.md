@@ -4,7 +4,7 @@ Dies ist ein einfaches UDP-Chatprotokoll, das es Benutzern ermöglicht, Nachrich
 
 # Programm starten
 
-ro
+mvn compile exec:java -Dexec.mainClass=net.p2pchat.Main -Dexec.args="5000"
 
 ! den Port 5000 durch den gewünschten Port ersetzen.
 

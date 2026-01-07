@@ -94,8 +94,11 @@ public class RoutingTable {
         // GLEICHER NEXTHOP → UPDATE
         // =========================
         if (old.nextHopIp == senderIp && old.nextHopPort == senderPort) {
-            old.distance = candidate.distance;
-            return true;
+            if (old.distance != candidate.distance) {
+                old.distance = candidate.distance;
+                return true;
+            }
+            return false;
         }
 
         return false;
@@ -123,6 +126,7 @@ public class RoutingTable {
 
         return routes.size() != before;
     }
+
 
     public static void removeDestination(int destIp, int destPort) {
         routes.remove(key(destIp, destPort));

@@ -19,6 +19,7 @@ public class HeartbeatMonitor {
                     Neighbor n = entry.getValue();
 
                     // Nachbar war lebend, ist jetzt aber timeoutet
+                    // Nachbar war lebend, ist jetzt aber timeoutet
                     if (n.alive && (now - n.lastHeard > TIMEOUT)) {
 
                         n.alive = false;
@@ -29,18 +30,17 @@ public class HeartbeatMonitor {
                                         + " | lastHeard=" + (now - n.lastHeard) + "ms"
                         );
 
-                        // ===== WICHTIGER FIX =====
-
-                        // 1. direkte Route (dist = 1) entfernen
+                        // 1. direkte Route entfernen
                         RoutingTable.removeDestination(n.ip, n.port);
 
                         // 2. alle indirekten Routen über diesen Nachbarn entfernen
-                        boolean changed = RoutingTable.removeVia(n.ip, n.port);
+                        RoutingTable.removeVia(n.ip, n.port);
 
-                        // 3. Routing-Update nur senden, wenn sich etwas geändert hat
-                        if (changed) {
-                            RoutingManager.broadcastRoutingUpdate();
-                        }
+                        // 3. Topologie-Ereignis markieren
+                        RoutingManager.topologyChanged = true;
+
+                        // 4. Initiales Routing-Update senden
+                        RoutingManager.broadcastRoutingUpdate();
                     }
                 }
 

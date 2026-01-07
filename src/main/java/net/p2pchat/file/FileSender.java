@@ -40,6 +40,8 @@ public class FileSender {
         NodeContext.socket.sendReliable(info, nextHop, route.nextHopPort);
 
         // ---------------- FRAMES ----------------
+
+        int frameIndex = 0;
         int chunkIndex = 0;
 
         while (chunkIndex < totalChunks) {
@@ -47,12 +49,10 @@ public class FileSender {
             int count = Math.min(FRAME_SIZE, totalChunks - chunkIndex);
             Packet[] framePackets = new Packet[count];
 
-            int frameIndex = chunkIndex / FRAME_SIZE;
-
             for (int i = 0; i < count; i++) {
                 int chunkId = chunkIndex + i;
                 framePackets[i] = PacketFactory.createFileChunk(
-                        fileSeq,                 // ✅ GLEICHE SequenceNumber
+                        fileSeq,
                         destIp,
                         destPort,
                         chunkId,
@@ -60,6 +60,7 @@ public class FileSender {
                         chunks.get(chunkId)
                 );
             }
+
             PendingPackets.trackFrame(
                     framePackets,
                     fileSeq,
@@ -76,7 +77,14 @@ public class FileSender {
                 );
             }
 
+            // ⛔ BLOCKIEREN BIS ACK DAS FRAME ENTFERNT
+            while (PendingPackets.getPending()
+                    .containsKey((((long) fileSeq) << 32) | (frameIndex & 0xffffffffL))) {
+                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+            }
+
             chunkIndex += count;
+            frameIndex++;
         }
     }
 }

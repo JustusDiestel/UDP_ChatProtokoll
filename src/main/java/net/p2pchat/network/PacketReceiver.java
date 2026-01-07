@@ -56,14 +56,16 @@ public class PacketReceiver {
 
         // ===================== NEIGHBOR MGMT (HOP!) =====================
         boolean wasAliveBefore = NeighborManager.isAlive(hopIp, hopPort);
-        NeighborManager.updateOrAdd(hopIp, hopPort);
+
+        if (header.type == 0x03 || header.type == 0x08) { // HELLO oder HEARTBEAT
+            NeighborManager.updateOrAdd(hopIp, hopPort);
+        }
 
         // ===================== ACK =====================
         if (header.type == 0x01) {
 
             int seq = header.sequenceNumber;
 
-            // 1) Alle FILE-Frames dieser Datei als bestätigt entfernen
             PendingPackets.getPending().entrySet().removeIf(e ->
                     e.getValue().isFrame &&
                             e.getValue().sequenceNumber == seq
@@ -229,8 +231,10 @@ public class PacketReceiver {
 
             if (payload.length < 2) return;
 
-            RoutingTable.ensureDirectNeighbor(hopIp, hopPort);
+            // Routing Updates nur von bekannten Nachbarn akzeptieren
+            if (!NeighborManager.isAlive(hopIp, hopPort)) return;
 
+            boolean newNeighbor = false;
             ByteBuffer buf = ByteBuffer.wrap(payload);
             int count = buf.getShort() & 0xFFFF;
 
@@ -254,8 +258,10 @@ public class PacketReceiver {
                     changed = true;
                 }
             }
-
-            if (changed) RoutingManager.broadcastRoutingUpdate();
+            if (RoutingManager.topologyChanged) {
+                RoutingManager.broadcastRoutingUpdate();
+                RoutingManager.topologyChanged = false;
+            }
         }
     }
 }

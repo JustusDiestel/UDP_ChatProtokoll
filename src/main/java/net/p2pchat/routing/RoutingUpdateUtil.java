@@ -38,9 +38,23 @@ public class RoutingUpdateUtil {
                     r.destPort == NodeContext.localPort)
                 continue;
 
-            // Split Horizon (Poison Reverse intern verwendet, aber keine 255-Updates)
+            // Split Horizon Hier war Fridi zufrieden
+            //if (r.nextHopIp == neighborIp &&
+             //   r.nextHopPort == neighborPort) {
+             //   continue;
+            //}
+
+            // ich glaub fridi wird hier nicht mehr zufrieden sein
             if (r.nextHopIp == neighborIp &&
-                r.nextHopPort == neighborPort) {
+                    r.nextHopPort == neighborPort) {
+
+                filtered.add(new Route(
+                        r.destIp,
+                        r.destPort,
+                        r.nextHopIp,
+                        r.nextHopPort,
+                        255
+                ));
                 continue;
             }
 
