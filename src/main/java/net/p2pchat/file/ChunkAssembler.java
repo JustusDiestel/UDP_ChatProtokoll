@@ -33,10 +33,22 @@ public class ChunkAssembler {
         fb.filename = filename;
         fb.totalChunks = h.chunkLength;
         files.put(h.sequenceNumber, fb);
+
+        System.out.println(
+                "[FILE_INFO] seq=" + h.sequenceNumber +
+                        " filename=" + filename +
+                        " totalChunks=" + h.chunkLength
+        );
     }
 
     // ================= FILE_CHUNK =================
     public static void receiveChunk(PacketHeader h, byte[] payload) {
+        System.out.println(
+                "[RECV CHUNK] seq=" + h.sequenceNumber +
+                        " chunkId=" + h.chunkId +
+                        " frameIndex=" + (h.chunkId / FRAME_SIZE) +
+                        " payloadLen=" + payload.length
+        );
 
         FileBuffer fb = files.get(h.sequenceNumber);
         if (fb == null) return;
@@ -52,6 +64,12 @@ public class ChunkAssembler {
         });
 
         frame.chunks.put(h.chunkId, payload);
+        System.out.println(
+                "[FRAME STATUS] seq=" + h.sequenceNumber +
+                        " frame=" + frameIndex +
+                        " have=" + frame.chunks.size() +
+                        "/" + frame.expected
+        );
 
         if (frame.chunks.size() < frame.expected) return;
 
@@ -62,10 +80,32 @@ public class ChunkAssembler {
         }
 
         if (missing.isEmpty()) {
+
+            System.out.println(
+                    "[FRAME COMPLETE] seq=" + h.sequenceNumber +
+                            " frame=" + frameIndex
+            );
+
             sendAck(h);
-            if (allFramesComplete(fb))
+
+            boolean all = allFramesComplete(fb);
+            System.out.println(
+                    "[FILE CHECK] seq=" + h.sequenceNumber +
+                            " allFramesComplete=" + all +
+                            " framesHave=" + fb.frames.size()
+            );
+
+            if (all)
                 writeFile(fb);
+
         } else {
+
+            System.out.println(
+                    "[FRAME INCOMPLETE] seq=" + h.sequenceNumber +
+                            " frame=" + frameIndex +
+                            " missing=" + missing.size()
+            );
+
             sendNoAck(h, missing);
         }
     }

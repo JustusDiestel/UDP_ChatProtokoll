@@ -78,6 +78,10 @@ public class PacketReceiver {
         if (header.type == 0x01) {
             if (header.payloadLength != 0) return;
             int seq = header.sequenceNumber;
+            System.out.println("[RECV ACK] seq=" + header.sequenceNumber
+                    + " fromHop=" + IpUtil.intToIp(hopIp) + ":" + hopPort
+                    + " src=" + IpUtil.intToIp(senderIp) + ":" + senderPort
+                    + " dst=" + IpUtil.intToIp(destIp) + ":" + destPort);
 
             // gesamtes Frame dieser Datei bestätigt
             PendingPackets.getPending().entrySet().removeIf(e ->
@@ -141,9 +145,9 @@ public class PacketReceiver {
                 Route r = RoutingTable.getRoute(destIp, destPort);
                 if (r == null) return;
 
-                NodeContext.socket.sendReliable(
+                NodeContext.socket.sendPacket(
                         new Packet(fwd, payload),
-                        IpUtil.intToIp(r.nextHopIp),
+                        NodeContext.socket.socketAddressForIp(r.nextHopIp),
                         r.nextHopPort
                 );
                 return;
@@ -192,9 +196,9 @@ public class PacketReceiver {
                 Route r = RoutingTable.getRoute(destIp, destPort);
                 if (r == null) return;
 
-                NodeContext.socket.sendReliable(
+                NodeContext.socket.sendPacket(
                         new Packet(fwd, payload),
-                        IpUtil.intToIp(r.nextHopIp),
+                        NodeContext.socket.socketAddressForIp(r.nextHopIp),
                         r.nextHopPort
                 );
                 return;
@@ -218,9 +222,9 @@ public class PacketReceiver {
                 Route r = RoutingTable.getRoute(destIp, destPort);
                 if (r == null) return;
 
-                NodeContext.socket.sendReliable(
+                NodeContext.socket.sendPacket(
                         new Packet(fwd, payload),
-                        IpUtil.intToIp(r.nextHopIp),
+                        NodeContext.socket.socketAddressForIp(r.nextHopIp),
                         r.nextHopPort
                 );
                 return;
