@@ -73,11 +73,7 @@ public class PendingPackets {
                                   int destIp,
                                   int destPort) {
 
-        // SAFETY: alte Frames dieser Datei entfernen
-        pending.entrySet().removeIf(e ->
-                e.getValue().isFrame &&
-                        e.getValue().sequenceNumber == sequenceNumber
-        );
+
 
         long k = key(sequenceNumber, frameIndex);
         pending.put(k, new Pending(frameChunks, sequenceNumber, frameIndex, destIp, destPort));
@@ -90,6 +86,19 @@ public class PendingPackets {
                         + " pendingSize=" + pending.size()
         );
 
+    }
+
+    // =====================================================
+// Prüft, ob IRGENDEIN Frame für diese Datei noch pending ist
+// (Stop-and-Wait pro Datei)
+// =====================================================
+    public static boolean hasFrameForSequence(int sequenceNumber) {
+        for (Pending p : pending.values()) {
+            if (p.isFrame && p.sequenceNumber == sequenceNumber) {
+                return true;
+            }
+        }
+        return false;
     }
 
 

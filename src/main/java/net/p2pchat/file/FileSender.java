@@ -6,7 +6,7 @@ import net.p2pchat.protocol.PacketFactory;
 import net.p2pchat.protocol.PendingPackets;
 import net.p2pchat.routing.RoutingManager;
 import net.p2pchat.util.IpUtil;
-import net.p2pchat.protocol.PendingPackets;
+
 import java.nio.file.Paths;
 import java.util.List;
 
@@ -14,10 +14,16 @@ public class FileSender {
 
     private static final int FRAME_SIZE = 128;
 
-    public static void sendFile(byte[] data, int destIp, int destPort, String path) throws InterruptedException {
+    public static void sendFile(byte[] data,
+                                int destIp,
+                                int destPort,
+                                String path) throws InterruptedException {
 
         var route = RoutingManager.getRoute(destIp, destPort);
-        if (route == null) return;
+        if (route == null) {
+            System.out.println("Keine Route zum Ziel");
+            return;
+        }
 
         String nextHop = IpUtil.intToIp(route.nextHopIp);
         String filename = Paths.get(path).getFileName().toString();
@@ -25,7 +31,9 @@ public class FileSender {
         List<byte[]> chunks = Chunker.split(data);
         int totalChunks = chunks.size();
 
-        // ===== EINE SequenceNumber für die GESAMTE DATEI =====
+        // =========================================================
+        // EINE SequenceNumber für die GESAMTE DATEI
+        // =========================================================
         int fileSeq = NodeContext.seqGen.next();
 
         // ---------------- FILE_INFO ----------------
@@ -39,8 +47,9 @@ public class FileSender {
 
         NodeContext.socket.sendReliable(info, nextHop, route.nextHopPort);
 
-        // ---------------- FRAMES ----------------
-
+        // =========================================================
+        // FRAMES (STOP-AND-WAIT)
+        // =========================================================
         int frameIndex = 0;
         int chunkIndex = 0;
 
@@ -67,14 +76,28 @@ public class FileSender {
                             " chunks=" + count
             );
 
-            PendingPackets.trackFrame(framePackets, fileSeq, frameIndex, destIp, destPort);
+            // =====================================================
+            // ⛔ STOP-AND-WAIT:
+            // Warten, bis KEIN Frame dieser Datei mehr pending ist
+            // =====================================================
+            while (PendingPackets.hasFrameForSequence(fileSeq)) {
+                Thread.sleep(10);
+            }
 
-            System.out.println(
-                    "[PENDING CHECK] key=" +
-                            ((((long) fileSeq) << 32) | (frameIndex & 0xffffffffL)) +
-                            " pendingSize=" + PendingPackets.getPending().size()
+            // =====================================================
+            // Frame JETZT erst registrieren
+            // =====================================================
+            PendingPackets.trackFrame(
+                    framePackets,
+                    fileSeq,
+                    frameIndex,
+                    destIp,
+                    destPort
             );
 
+            // =====================================================
+            // Frame senden
+            // =====================================================
             for (Packet p : framePackets) {
                 NodeContext.socket.sendPacket(
                         p,
@@ -83,19 +106,31 @@ public class FileSender {
                 );
             }
 
+            // =====================================================
+            // Warten auf ACK(seq) oder NO_ACK → Resend passiert woanders
+            // =====================================================
             int retries = 0;
             long lastSend = System.currentTimeMillis();
 
-// ⛔ STOP-AND-WAIT: warte auf ACK(seq)
-            while (PendingPackets.hasFrame(fileSeq, frameIndex)) {
+            while (PendingPackets.hasFrameForSequence(fileSeq)) {
+
                 if (System.currentTimeMillis() - lastSend > 3000) {
 
                     if (++retries > 3) {
+                        System.out.println(
+                                "[FILE SEND ABORT] seq=" + fileSeq +
+                                        " frameIndex=" + frameIndex
+                        );
                         PendingPackets.dropFrame(fileSeq, frameIndex);
-                        return; // best effort → abbrechen
+                        return; // Best effort
                     }
 
-                    // Frame erneut senden
+                    System.out.println(
+                            "[FRAME RETRY] seq=" + fileSeq +
+                                    " frameIndex=" + frameIndex +
+                                    " attempt=" + retries
+                    );
+
                     for (Packet p : framePackets) {
                         NodeContext.socket.sendPacket(
                                 p,
@@ -113,5 +148,7 @@ public class FileSender {
             chunkIndex += count;
             frameIndex++;
         }
+
+        System.out.println("[FILE SEND DONE] seq=" + fileSeq);
     }
 }

@@ -33,13 +33,28 @@ public class RoutingUpdateUtil {
 
         for (Route r : tableCopy) {
 
-            // eigene Adresse nicht senden
+            // eigene Adresse niemals senden
             if (r.destIp == NodeContext.localIp &&
                     r.destPort == NodeContext.localPort)
                 continue;
 
-            // 1) Bereits poisonte Routen IMMER announcen (255)
+            // Route zum Nachbarn selbst niemals senden
+            if (r.destIp == neighborIp &&
+                    r.destPort == neighborPort)
+                continue;
+
+            // =========================
+            // TODES-POISON (NUR DANN!)
+            // =========================
             if (r.distance >= 255) {
+
+                // niemals Poison zurück an den,
+                // von dem wir die Route gelernt haben
+                if (r.nextHopIp == neighborIp &&
+                        r.nextHopPort == neighborPort)
+                    continue;
+
+                // einmal als 255 announcen
                 filtered.add(new Route(
                         r.destIp,
                         r.destPort,
@@ -50,21 +65,14 @@ public class RoutingUpdateUtil {
                 continue;
             }
 
-            // 2) Poison Reverse: Route über Empfänger gelernt
+            // =========================
+            // SPLIT HORIZON (LEBEND)
+            // =========================
             if (r.nextHopIp == neighborIp &&
-                    r.nextHopPort == neighborPort) {
-
-                filtered.add(new Route(
-                        r.destIp,
-                        r.destPort,
-                        r.nextHopIp,
-                        r.nextHopPort,
-                        255
-                ));
+                    r.nextHopPort == neighborPort)
                 continue;
-            }
 
-            // 3) Normale Route
+            // normale lebende Route
             filtered.add(new Route(
                     r.destIp,
                     r.destPort,

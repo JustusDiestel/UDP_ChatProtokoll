@@ -54,6 +54,19 @@ public class PacketReceiver {
 
         if (!Arrays.equals(HashUtil.sha256(payload), header.checksum)) return;
 
+        // Neues: gemeinsame Prüfung, ob das Paket für diesen Knoten bestimmt ist,
+        // und kurzes Logging wenn ja.
+        boolean destinedForMe =
+                destIp == NodeContext.localIp &&
+                        destPort == NodeContext.localPort;
+
+        if (destinedForMe) {
+            System.out.println(
+                     " von " + IpUtil.intToIp(senderIp) + ":" + senderPort
+                    + " seq=" + header.sequenceNumber
+                    + " len=" + payload.length);
+        }
+
         // ===================== NEIGHBOR MGMT (HOP!) =====================
         boolean wasAliveBefore = NeighborManager.isAlive(hopIp, hopPort);
 
@@ -93,6 +106,7 @@ public class PacketReceiver {
 
             PendingPackets.updateMissingChunks(seq, frameIndex, missing);
             FileResender.resendChunks(seq, frameIndex, missing);
+            System.out.println("[NO_ACK] seq=" + seq + " frameIndex=" + frameIndex + " missingCount=" + count);
             return;
         }
 
@@ -161,6 +175,11 @@ public class PacketReceiver {
 
         // ===================== FILE_CHUNK =====================
         if (header.type == 0x06) {
+            System.out.println(
+                    "[RECV FILE_CHUNK] seq=" + header.sequenceNumber +
+                            " chunkId=" + header.chunkId +
+                            " from=" + IpUtil.intToIp(senderIp) + ":" + senderPort
+            );
 
             boolean isForMe =
                     destIp == NodeContext.localIp &&
@@ -265,3 +284,4 @@ public class PacketReceiver {
         }
     }
 }
+
