@@ -57,9 +57,9 @@ public static volatile boolean topologyChanged = false;
 
                 NodeContext.socket.sendPacket(update, addr, n.port);
 
-                System.out.println("ROUTING_UPDATE → "
-                        + IpUtil.intToIp(n.ip) + ":" + n.port
-                        + " | entries=" + ((payload.length - 2) / 7));
+                // System.out.println("ROUTING_UPDATE → "
+                //        + IpUtil.intToIp(n.ip) + ":" + n.port
+                //        + " | entries=" + ((payload.length - 2) / 7));
 
             } catch (Exception e) {
                 System.err.println(

@@ -43,7 +43,7 @@ public class PacketReceiver {
         // ===================== ORIGINAL HEADER FIELDS =====================
         int senderIp = header.sourceIp;
         int senderPort = header.sourcePort & 0xFFFF;
-
+        int typeName = header.type;
         int destIp = header.destinationIp;
         int destPort = header.destinationPort & 0xFFFF;
 
@@ -59,14 +59,14 @@ public class PacketReceiver {
         boolean destinedForMe =
                 destIp == NodeContext.localIp &&
                         destPort == NodeContext.localPort;
-
+/**
         if (destinedForMe) {
-            System.out.println(
-                     " von " + IpUtil.intToIp(senderIp) + ":" + senderPort
+            System.out.println("[RECV] " + typeName
+                    + " von " + IpUtil.intToIp(senderIp) + ":" + senderPort
                     + " seq=" + header.sequenceNumber
                     + " len=" + payload.length);
         }
-
+**/
         // ===================== NEIGHBOR MGMT (HOP!) =====================
         boolean wasAliveBefore = NeighborManager.isAlive(hopIp, hopPort);
 
