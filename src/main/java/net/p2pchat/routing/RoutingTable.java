@@ -129,6 +129,32 @@ public class RoutingTable {
         return routes.size() != before;
     }
 
+    public static boolean poisonDestination(int destIp, int destPort) {
+        Route r = routes.get(key(destIp, destPort));
+        if (r == null) return false;
+
+        boolean changed = (r.distance != 255);
+        r.distance = 255;
+        r.poisonedAt = System.currentTimeMillis();
+        return changed;
+    }
+
+    public static boolean poisonVia(int nextHopIp, int nextHopPort) {
+        long now = System.currentTimeMillis();
+        boolean changed = false;
+
+        for (Route r : routes.values()) {
+            if (r.distance == 1) continue;
+
+            if (r.nextHopIp == nextHopIp && r.nextHopPort == nextHopPort) {
+                if (r.distance != 255) changed = true;
+                r.distance = 255;
+                r.poisonedAt = now;
+            }
+        }
+        return changed;
+    }
+
     public static void cleanupPoisoned(long now, long poisonHoldMs) {
         routes.entrySet().removeIf(e -> {
             Route r = e.getValue();

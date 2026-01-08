@@ -38,13 +38,19 @@ public class RoutingUpdateUtil {
                     r.destPort == NodeContext.localPort)
                 continue;
 
-            // Split Horizon Hier war Fridi zufrieden
-            //if (r.nextHopIp == neighborIp &&
-             //   r.nextHopPort == neighborPort) {
-             //   continue;
-            //}
+            // 1) Bereits poisonte Routen IMMER announcen (255)
+            if (r.distance >= 255) {
+                filtered.add(new Route(
+                        r.destIp,
+                        r.destPort,
+                        r.nextHopIp,
+                        r.nextHopPort,
+                        255
+                ));
+                continue;
+            }
 
-            // ich glaub fridi wird hier nicht mehr zufrieden sein
+            // 2) Poison Reverse: Route über Empfänger gelernt
             if (r.nextHopIp == neighborIp &&
                     r.nextHopPort == neighborPort) {
 
@@ -58,19 +64,13 @@ public class RoutingUpdateUtil {
                 continue;
             }
 
-            // Unreachable Routen niemals announcen
-            if (r.distance >= 255) {
-                continue;
-            }
-
-            // Normale Route
-            int dist = Math.min(r.distance, 254);
+            // 3) Normale Route
             filtered.add(new Route(
                     r.destIp,
                     r.destPort,
                     r.nextHopIp,
                     r.nextHopPort,
-                    dist
+                    Math.min(r.distance, 254)
             ));
         }
 

@@ -259,9 +259,8 @@ public class PacketReceiver {
                     changed = true;
                 }
             }
-            if (RoutingManager.topologyChanged) {
+            if (changed) {
                 RoutingManager.broadcastRoutingUpdate();
-                RoutingManager.topologyChanged = false;
             }
         }
     }

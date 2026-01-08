@@ -30,6 +30,8 @@ public class NeighborManager {
 
         if (!before.alive && after.alive) {
             System.out.println("Nachbar wieder aktiv: " + k);
+            RoutingTable.ensureDirectNeighbor(ip, port);
+            RoutingManager.topologyChanged = true;
             return true;
         }
 

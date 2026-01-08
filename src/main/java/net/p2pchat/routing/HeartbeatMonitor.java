@@ -31,11 +31,11 @@ public class HeartbeatMonitor {
                                         + " | lastHeard=" + (now - n.lastHeard) + "ms"
                         );
 
-                        // 1. direkte Route entfernen
-                        RoutingTable.removeDestination(n.ip, n.port);
+                        // 1. direkte Route poisonen
+                        RoutingTable.poisonDestination(n.ip, n.port);
 
-                        // 2. alle indirekten Routen über diesen Nachbarn entfernen
-                        RoutingTable.removeVia(n.ip, n.port);
+// 2. alle indirekten Routen über diesen Nachbarn poisonen
+                        RoutingTable.poisonVia(n.ip, n.port);
 
                         // 3. Topologie-Ereignis markieren
                         RoutingManager.topologyChanged = true;
