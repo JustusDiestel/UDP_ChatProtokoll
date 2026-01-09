@@ -19,29 +19,71 @@ public class FileResender {
                 PendingPackets.getPending()
                         .get((((long) sequenceNumber) << 32) | (frameIndex & 0xffffffffL));
 
-        if (p == null) return;
+        if (p == null) {
+            System.err.println(
+                    "[RESEND ERROR] Frame nicht gefunden: seq=" + sequenceNumber +
+                            " frame=" + frameIndex
+            );
+            return;
+        }
 
         Route r = RoutingTable.getRoute(p.destIp, p.destPort);
-        if (r == null) return;
+        if (r == null) {
+            System.err.println(
+                    "[RESEND ERROR] Keine Route: dest=" + p.destIp + ":" + p.destPort
+            );
+            return;
+        }
 
         InetAddress nextHop;
         try {
             nextHop = InetAddress.getByName(IpUtil.intToIp(r.nextHopIp));
         } catch (Exception e) {
+            System.err.println("[RESEND ERROR] Invalid IP: " + r.nextHopIp);
             return;
         }
 
+        System.out.println(
+                "[RESEND START] seq=" + sequenceNumber +
+                        " frame=" + frameIndex +
+                        " missing=" + missing.length + " chunks"
+        );
+
+        int resent = 0;
         for (int chunkId : missing) {
 
-            int localIndex = chunkId - (frameIndex * 128);
+            // ⚠️ WICHTIG: localIndex basiert auf chunkId % FRAME_SIZE, nicht frameIndex!
+            int localIndex = chunkId % 128;
 
-            if (localIndex < 0 || localIndex >= p.frameChunks.length)
+            if (localIndex < 0 || localIndex >= p.frameChunks.length) {
+                System.err.println(
+                        "[RESEND ERROR] Invalid localIndex: chunkId=" + chunkId +
+                                " localIndex=" + localIndex + " arrayLen=" + p.frameChunks.length
+                );
                 continue;
+            }
 
             Packet pkt = p.frameChunks[localIndex];
             if (pkt != null) {
                 NodeContext.socket.sendPacket(pkt, nextHop, r.nextHopPort);
+                resent++;
+
+                System.out.println(
+                        "[RESEND] chunkId=" + chunkId +
+                                " localIndex=" + localIndex
+                );
+            } else {
+                System.err.println(
+                        "[RESEND ERROR] Packet ist null: chunkId=" + chunkId +
+                                " localIndex=" + localIndex
+                );
             }
         }
+
+        System.out.println(
+                "[RESEND DONE] seq=" + sequenceNumber +
+                        " frame=" + frameIndex +
+                        " resent=" + resent + "/" + missing.length
+        );
     }
 }

@@ -83,27 +83,16 @@ public class FileSender {
             );
 
             // =====================================================
-            // ⛔ STOP-AND-WAIT:
-            // Warten, bis KEIN Frame dieser Datei mehr pending ist
-            // =====================================================
+// ⛔ STOP-AND-WAIT:
+// Warten, bis KEIN Frame dieser Datei mehr pending ist
+// =====================================================
             while (PendingPackets.hasFrameForSequence(fileSeq)) {
                 Thread.sleep(10);
             }
 
-            // =====================================================
-            // Frame JETZT erst registrieren
-            // =====================================================
-            PendingPackets.trackFrame(
-                    framePackets,
-                    fileSeq,
-                    frameIndex,
-                    destIp,
-                    destPort
-            );
-
-            // =====================================================
-            // Frame senden
-            // =====================================================
+// =====================================================
+// Frame SOFORT senden (BEVOR tracking!)
+// =====================================================
             for (Packet p : framePackets) {
                 NodeContext.socket.sendPacket(
                         p,
@@ -112,20 +101,62 @@ public class FileSender {
                 );
             }
 
-            // =====================================================
-            // Warten auf ACK(seq) oder NO_ACK → Resend passiert woanders
-            // =====================================================
+// =====================================================
+// JETZT erst Frame registrieren (nach dem Senden!)
+// =====================================================
+            PendingPackets.trackFrame(
+                    framePackets,
+                    fileSeq,
+                    frameIndex,
+                    destIp,
+                    destPort
+            );
+
+// =====================================================
+// Warten auf ACK(seq) oder NO_ACK → Resend passiert woanders
+// =====================================================
             int retries = 0;
             long lastSend = System.currentTimeMillis();
 
-            while (PendingPackets.hasFrameForSequence(fileSeq)) {
+// ⚠️ NEU: Warte UNBEGRENZT auf ACK (mit Retries alle 3 Sekunden)
+            while (true) {
 
+                // Prüfen ob Frame ACKed wurde
+                if (!PendingPackets.hasFrameForSequence(fileSeq)) {
+                    // ✅ ACK empfangen! Weiter zum nächsten Frame
+                    break;
+                }
+
+                // Timeout-Check (alle 3 Sekunden)
                 if (System.currentTimeMillis() - lastSend > 3000) {
+
+                    // Route-Check...
+                    route = RoutingManager.getRoute(destIp, destPort);
+                    if (route == null) {
+                        System.out.println(
+                                "[FILE SEND ABORT] seq=" + fileSeq +
+                                        " frameIndex=" + frameIndex +
+                                        " reason=NO_ROUTE"
+                        );
+                        PendingPackets.dropFrame(fileSeq, frameIndex);
+
+                        // Alle nachfolgenden Frames droppen
+                        for (int futureFrame = frameIndex + 1;
+                             futureFrame < (totalChunks + FRAME_SIZE - 1) / FRAME_SIZE;
+                             futureFrame++) {
+                            if (PendingPackets.hasFrame(fileSeq, futureFrame)) {
+                                PendingPackets.dropFrame(fileSeq, futureFrame);
+                            }
+                        }
+
+                        return; // Kompletter Abbruch
+                    }
 
                     if (++retries > 3) {
                         System.out.println(
                                 "[FILE SEND ABORT] seq=" + fileSeq +
-                                        " frameIndex=" + frameIndex
+                                        " frameIndex=" + frameIndex +
+                                        " reason=MAX_RETRIES"
                         );
                         PendingPackets.dropFrame(fileSeq, frameIndex);
                         return; // Best effort
@@ -134,9 +165,11 @@ public class FileSender {
                     System.out.println(
                             "[FRAME RETRY] seq=" + fileSeq +
                                     " frameIndex=" + frameIndex +
-                                    " attempt=" + retries
+                                    " attempt=" + retries +
+                                    " nextHop=" + IpUtil.intToIp(route.nextHopIp) + ":" + route.nextHopPort
                     );
 
+                    // Route könnte sich geändert haben → neue nextHop IP nutzen!
                     for (Packet p : framePackets) {
                         NodeContext.socket.sendPacket(
                                 p,
@@ -150,6 +183,12 @@ public class FileSender {
 
                 Thread.sleep(10);
             }
+
+// ✅ Hier angekommen bedeutet: ACK empfangen!
+            System.out.println(
+                    "[FRAME ACK RECEIVED] seq=" + fileSeq +
+                            " frameIndex=" + frameIndex
+            );
 
             chunkIndex += count;
             frameIndex++;

@@ -96,18 +96,39 @@ public class UdpSocket {
                         if (p.isFrame) {
 
                             if (p.missingChunks != null) {
-                                for (int miss : p.missingChunks) {
-                                    for (Packet fp : p.frameChunks) {
-                                        if (fp != null && fp.header.chunkId == miss) {
+                                // ⚠️ OPTIMIERT: Nutze chunkId % 128 als Index
+                                System.out.println(
+                                        "[RETRY MISSING] seq=" + p.sequenceNumber +
+                                                " frame=" + p.frameIndex +
+                                                " missing=" + p.missingChunks.length
+                                );
+
+                                for (int chunkId : p.missingChunks) {
+                                    int localIdx = chunkId % 128;  // ✅ Direct index lookup
+
+                                    if (localIdx >= 0 && localIdx < p.frameChunks.length) {
+                                        Packet fp = p.frameChunks[localIdx];
+                                        if (fp != null) {
                                             sendPacket(fp, nextHop, r.nextHopPort);
-                                            break;
+                                        } else {
+                                            System.err.println(
+                                                    "[RETRY ERROR] Missing chunk packet: chunkId=" + chunkId
+                                            );
                                         }
                                     }
                                 }
                             } else {
+                                // Komplettes Frame resenden
+                                System.out.println(
+                                        "[RETRY FULL] seq=" + p.sequenceNumber +
+                                                " frame=" + p.frameIndex +
+                                                " chunks=" + p.frameChunks.length
+                                );
+
                                 for (Packet fp : p.frameChunks) {
-                                    if (fp != null)
+                                    if (fp != null) {
                                         sendPacket(fp, nextHop, r.nextHopPort);
+                                    }
                                 }
                             }
 

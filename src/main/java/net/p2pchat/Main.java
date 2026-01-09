@@ -39,7 +39,7 @@ public class Main {
 
         HeartbeatSender.start();
         HeartbeatMonitor.start();
-        RoutingManager.startPeriodicUpdates(); // ← HIER
+        RoutingManager.startPeriodicUpdates();
 
         System.out.println("Node gestartet auf " + localIpStr + ":" + NodeContext.localPort);
         System.out.println("Befehle:");
@@ -132,14 +132,58 @@ public class Main {
                     continue;
                 }
 
-                FileSender.sendFile(file, destIp, destPort, path);
+                final byte[] fileData = file;
+                new Thread(() -> {
+                    try {
+                        FileSender.sendFile(fileData, destIp, destPort, path);
+                    } catch (Exception e) { e.printStackTrace(); }
+                }).start();
+                System.out.println("File transfer started in background: " + path);
                 continue;
             }
 
             System.out.println("Unbekannter Befehl.");
         }
 
+        // ========================================================================
+        // ⚠️ NEU: GOODBYE AN ALLE NACHBARN SENDEN (Spezifikation 4.3)
+        // ========================================================================
         System.out.println("Stopping node...");
+        System.out.println("Sending GOODBYE to all neighbors...");
+
+        for (var entry : NeighborManager.getAll().entrySet()) {
+            Neighbor n = entry.getValue();
+
+            // Nur an lebende Nachbarn senden
+            if (!n.alive) continue;
+
+            try {
+                var goodbye = PacketFactory.createGoodbye(
+                        NodeContext.seqGen.next(),
+                        n.ip,
+                        n.port
+                );
+
+                NodeContext.socket.sendPacket(
+                        goodbye,
+                        java.net.InetAddress.getByName(IpUtil.intToIp(n.ip)),
+                        n.port
+                );
+
+                System.out.println("GOODBYE → " + IpUtil.intToIp(n.ip) + ":" + n.port);
+
+            } catch (Exception e) {
+                System.err.println("Failed to send GOODBYE to " +
+                        IpUtil.intToIp(n.ip) + ":" + n.port + " - " + e.getMessage());
+            }
+        }
+
+        // Kurz warten, damit GOODBYE-Pakete noch gesendet werden können
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException ignored) {}
+
         NodeContext.socket.stop();
+        System.out.println("Node stopped.");
     }
 }

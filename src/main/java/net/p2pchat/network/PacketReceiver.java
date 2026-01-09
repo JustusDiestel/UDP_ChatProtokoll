@@ -123,7 +123,24 @@ public class PacketReceiver {
             int[] missing = new int[count];
             for (int i = 0; i < count; i++) missing[i] = buf.getInt();
 
+            // ⚠️ KRITISCH: Alle Chunks müssen vom gleichen Frame sein!
             int frameIndex = missing[0] / FRAME_SIZE;
+            for (int m : missing) {
+                if (m / FRAME_SIZE != frameIndex) {
+                    System.err.println(
+                            "[NO_ACK ERROR] Chunks aus verschiedenen Frames: " +
+                                    "first=" + missing[0] + " invalid=" + m
+                    );
+                    return;  // ❌ Ungültiges NO_ACK ignorieren
+                }
+            }
+
+            System.out.println(
+                    "[NO_ACK RECV] seq=" + seq +
+                            " frameIndex=" + frameIndex +
+                            " missing=" + missing.length + " chunks"
+            );
+
             PendingPackets.updateMissingChunks(seq, frameIndex, missing);
             FileResender.resendChunks(seq, frameIndex, missing);
             return;

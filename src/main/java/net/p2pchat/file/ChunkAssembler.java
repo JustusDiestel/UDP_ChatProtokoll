@@ -47,7 +47,8 @@ public class ChunkAssembler {
     }
 
     // ================= FILE_CHUNK =================
-    public static void receiveChunk(PacketHeader h, byte[] payload) {
+    public static synchronized void receiveChunk(PacketHeader h, byte[] payload) {
+        // ⚠️ WICHTIG: synchronized für Thread-Safety!
 
         int frameIndex = h.chunkId / FRAME_SIZE;
 
@@ -59,7 +60,13 @@ public class ChunkAssembler {
         );
 
         FileBuffer fb = files.get(h.sequenceNumber);
-        if (fb == null) return;
+        if (fb == null) {
+            System.err.println(
+                    "[ERROR] Chunk ohne FILE_INFO: seq=" + h.sequenceNumber +
+                            " chunkId=" + h.chunkId
+            );
+            return;
+        }
 
         int frameStart = frameIndex * FRAME_SIZE;
         int frameEnd = Math.min(frameStart + FRAME_SIZE, fb.totalChunks);
@@ -70,17 +77,26 @@ public class ChunkAssembler {
             return f;
         });
 
-// ===== FIX 1: Frame-Duplikate =====
+        // ===== FIX 1: Frame bereits komplett → sofort ACK =====
         if (frame.complete) {
+            System.out.println(
+                    "[DUPLICATE FRAME] seq=" + h.sequenceNumber +
+                            " frame=" + frameIndex + " → resending ACK"
+            );
             sendAck(h);
             return;
         }
 
-// ===== FIX 2: Chunk-Duplikate =====
+        // ===== FIX 2: Chunk-Duplikat → stillschweigend ignorieren =====
         if (frame.chunks.containsKey(h.chunkId)) {
+            System.out.println(
+                    "[DUPLICATE CHUNK] seq=" + h.sequenceNumber +
+                            " chunkId=" + h.chunkId + " → ignored"
+            );
             return;
         }
 
+        // Chunk speichern
         frame.chunks.put(h.chunkId, payload);
 
         System.out.println(
@@ -90,30 +106,33 @@ public class ChunkAssembler {
                         "/" + frame.expected
         );
 
-        // Noch nicht voll
-        if (frame.chunks.size() < frame.expected)
+        // ⚠️ WICHTIG: Warten bis wir genug Chunks haben
+        if (frame.chunks.size() < frame.expected) {
             return;
+        }
 
-        // Fehlende Chunks prüfen
+        // ===== Frame ist voll → Vollständigkeit prüfen =====
         List<Integer> missing = new ArrayList<>();
         for (int i = frameStart; i < frameEnd; i++) {
-            if (!frame.chunks.containsKey(i))
+            if (!frame.chunks.containsKey(i)) {
                 missing.add(i);
+            }
         }
 
         if (!missing.isEmpty()) {
-
+            // Frame unvollständig → NO_ACK senden
             System.out.println(
                     "[FRAME INCOMPLETE] seq=" + h.sequenceNumber +
                             " frame=" + frameIndex +
-                            " missing=" + missing.size()
+                            " missing=" + missing.size() + " chunks: " + missing
             );
 
             sendNoAck(h, missing);
             return;
         }
 
-        // ===== FRAME IST VOLLSTÄNDIG =====
+        // ===== Frame ist VOLLSTÄNDIG =====
+        // ⚠️ JETZT ERST complete setzen (nach allen Checks!)
         frame.complete = true;
 
         System.out.println(
@@ -123,15 +142,21 @@ public class ChunkAssembler {
 
         sendAck(h);
 
-        boolean all = allFramesComplete(fb);
+        // ===== Prüfen ob ALLE Frames fertig sind =====
+        boolean allComplete = allFramesComplete(fb);
 
         System.out.println(
                 "[FILE CHECK] seq=" + h.sequenceNumber +
-                        " allFramesComplete=" + all +
-                        " framesHave=" + fb.frames.size()
+                        " allFramesComplete=" + allComplete +
+                        " framesHave=" + fb.frames.size() +
+                        " totalChunks=" + fb.totalChunks
         );
 
-        if (all) {
+        if (allComplete) {
+            System.out.println(
+                    "[FILE COMPLETE] seq=" + h.sequenceNumber +
+                            " → writing to disk"
+            );
             writeFile(fb);
             files.remove(h.sequenceNumber); // aufräumen
         }
@@ -140,30 +165,56 @@ public class ChunkAssembler {
     // ================= VOLLSTÄNDIGKEIT =================
     private static boolean allFramesComplete(FileBuffer fb) {
 
-        for (int chunkId = 0; chunkId < fb.totalChunks; chunkId++) {
-            int frameIndex = chunkId / FRAME_SIZE;
-            Frame f = fb.frames.get(frameIndex);
+        // Berechne erwartete Anzahl Frames
+        int expectedFrames = (fb.totalChunks + FRAME_SIZE - 1) / FRAME_SIZE;
 
-            if (f == null || !f.chunks.containsKey(chunkId)) {
+        System.out.println(
+                "[FILE CHECK DETAIL] totalChunks=" + fb.totalChunks +
+                        " expectedFrames=" + expectedFrames +
+                        " currentFrames=" + fb.frames.size()
+        );
 
-                System.out.println("[MISSING] seq=" + /*seq*/ " chunkId=" + chunkId
-                        + " frameHave=" + (f == null ? 0 : f.chunks.size()) + "/" + (f == null ? -1 : f.expected));
+        // Prüfe, ob wir alle Frames haben
+        if (fb.frames.size() < expectedFrames) {
+            System.out.println(
+                    "[MISSING FRAMES] have=" + fb.frames.size() +
+                            " need=" + expectedFrames
+            );
+            return false;
+        }
+
+        // Prüfe, ob jeder Frame komplett ist
+        for (int frameIdx = 0; frameIdx < expectedFrames; frameIdx++) {
+            Frame f = fb.frames.get(frameIdx);
+
+            if (f == null) {
+                System.out.println("[MISSING FRAME] frameIndex=" + frameIdx);
+                return false;
+            }
+
+            if (!f.complete) {
+                System.out.println(
+                        "[INCOMPLETE FRAME] frameIndex=" + frameIdx +
+                                " have=" + f.chunks.size() + "/" + f.expected
+                );
                 return false;
             }
         }
+
+        System.out.println("[ALL FRAMES COMPLETE] ✓");
         return true;
     }
 
     // ================= ACK / NO_ACK =================
     private static void sendAck(PacketHeader h) {
         var r = net.p2pchat.routing.RoutingTable.getRoute(h.sourceIp, h.sourcePort & 0xFFFF);
-        if (r == null) return;
-
-        PacketFactory.createAck(
-                h.sequenceNumber,
-                h.sourceIp,
-                h.sourcePort & 0xFFFF
-        );
+        if (r == null) {
+            System.err.println(
+                    "[ACK ERROR] No route to sender: " +
+                            h.sourceIp + ":" + (h.sourcePort & 0xFFFF)
+            );
+            return;
+        }
 
         var ack = PacketFactory.createAck(
                 h.sequenceNumber,
@@ -175,6 +226,12 @@ public class ChunkAssembler {
                 ack,
                 NodeContext.socket.socketAddressForIp(r.nextHopIp),
                 r.nextHopPort
+        );
+
+        System.out.println(
+                "[ACK SENT] seq=" + h.sequenceNumber +
+                        " to=" + (h.sourceIp) + ":" + (h.sourcePort & 0xFFFF) +
+                        " via=" + r.nextHopIp + ":" + r.nextHopPort
         );
     }
 

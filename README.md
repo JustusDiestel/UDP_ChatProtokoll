@@ -24,7 +24,7 @@ sendfile 10.8.3.4 1234 src/testDateien/test2_justus_diestel.png
 sendfile 10.8.3.4 1234 src/testDateien/test2_justus_diestel.png
 sendfile 10.8.3.4 1234 src/testDateien/JustusDixLongVonHannesOGFile
 sendfile 10.8.3.3 9000 src/testDateien/test4_justus_diestel.png
-sendfile 10.8.3.4 1234 src/testDateien/skredis_powerpoint_amazon.pptx
+sendfile 10.8.3.3 1234 src/testDateien/skredis_powerpoint_amazon.pptx
 sendfile 10.8.3.3 9000 src/testDateien/JustusDixLongVonHannesOGFile
 
 

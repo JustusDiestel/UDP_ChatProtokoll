@@ -143,4 +143,31 @@ public class PendingPackets {
                         " frameIndex=" + frameIndex
         );
     }
+
+    // ================= GETTER FÜR FRAME-DATEN =================
+
+    /**
+     * Gibt die Packets eines Frames zurück (für Retry-Logic)
+     */
+    public static Packet[] getFramePackets(int sequenceNumber, int frameIndex) {
+        Pending p = pending.get(key(sequenceNumber, frameIndex));
+        return (p != null && p.isFrame) ? p.frameChunks : null;
+    }
+
+    /**
+     * Gibt die fehlenden Chunk-IDs zurück (falls NO_ACK empfangen wurde)
+     */
+    public static int[] getMissingChunks(int sequenceNumber, int frameIndex) {
+        Pending p = pending.get(key(sequenceNumber, frameIndex));
+        return (p != null && p.isFrame) ? p.missingChunks : null;
+    }
+
+    /**
+     * Prüft, ob ein spezifisches Frame existiert
+     */
+    public static Pending getFramePending(int sequenceNumber, int frameIndex) {
+        long k = key(sequenceNumber, frameIndex);
+        Pending p = pending.get(k);
+        return (p != null && p.isFrame) ? p : null;
+    }
 }
