@@ -75,20 +75,38 @@ public class PacketReceiver {
         }
 
         // ===================== ACK =====================
+        // ===================== ACK =====================
         if (header.type == 0x01) {
             if (header.payloadLength != 0) return;
+
             int seq = header.sequenceNumber;
-            System.out.println("[RECV ACK] seq=" + header.sequenceNumber
+
+            System.out.println("[RECV ACK] seq=" + seq
                     + " fromHop=" + IpUtil.intToIp(hopIp) + ":" + hopPort
                     + " src=" + IpUtil.intToIp(senderIp) + ":" + senderPort
                     + " dst=" + IpUtil.intToIp(destIp) + ":" + destPort);
 
-            // gesamtes Frame dieser Datei bestätigt
-            PendingPackets.getPending().entrySet().removeIf(e ->
-                    e.getValue().isFrame && e.getValue().sequenceNumber == seq
-            );
+            // 1) ZUERST: ist das ACK für ein SINGLE (z.B. FILE_INFO)?
+            if (PendingPackets.getPending().containsKey((((long) seq) << 32) | 0xffffffffL)) { // key(seq,-1)
+                PendingPackets.clearSingle(seq);
+                return;
+            }
 
-            PendingPackets.clearSingle(seq);
+            // 2) SONST: genau EIN Frame bestätigen (Stop-and-Wait)
+            PendingPackets.Pending oldest = null;
+            for (PendingPackets.Pending p : PendingPackets.getPending().values()) {
+                if (!p.isFrame) continue;
+                if (p.sequenceNumber != seq) continue;
+
+                if (oldest == null || p.frameIndex < oldest.frameIndex) {
+                    oldest = p;
+                }
+            }
+
+            if (oldest != null) {
+                PendingPackets.clearFrame(seq, oldest.frameIndex);
+            }
+
             return;
         }
 

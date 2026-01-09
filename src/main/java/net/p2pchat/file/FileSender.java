@@ -47,6 +47,12 @@ public class FileSender {
 
         NodeContext.socket.sendReliable(info, nextHop, route.nextHopPort);
 
+// 🔒 HART WARTEN bis FILE_INFO ACK da ist
+        while (PendingPackets.hasFrameForSequence(fileSeq)
+                || PendingPackets.getPending().containsKey((((long) fileSeq) << 32) | 0xffffffffL)) {
+            Thread.sleep(10);
+        }
+
         // =========================================================
         // FRAMES (STOP-AND-WAIT)
         // =========================================================

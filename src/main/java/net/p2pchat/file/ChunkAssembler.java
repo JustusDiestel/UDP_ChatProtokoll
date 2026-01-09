@@ -17,6 +17,7 @@ public class ChunkAssembler {
     private static class Frame {
         int expected;
         Map<Integer, byte[]> chunks = new ConcurrentHashMap<>();
+        boolean complete = false; // nur für Logging
     }
 
     private static class FileBuffer {
@@ -29,6 +30,10 @@ public class ChunkAssembler {
 
     // ================= FILE_INFO =================
     public static void setFileInfo(PacketHeader h, String filename) {
+        if (files.containsKey(h.sequenceNumber)) {
+            // schon bekannt -> ignorieren (optional log)
+            return;
+        }
         FileBuffer fb = new FileBuffer();
         fb.filename = filename;
         fb.totalChunks = h.chunkLength;
@@ -43,17 +48,19 @@ public class ChunkAssembler {
 
     // ================= FILE_CHUNK =================
     public static void receiveChunk(PacketHeader h, byte[] payload) {
+
+        int frameIndex = h.chunkId / FRAME_SIZE;
+
         System.out.println(
                 "[RECV CHUNK] seq=" + h.sequenceNumber +
                         " chunkId=" + h.chunkId +
-                        " frameIndex=" + (h.chunkId / FRAME_SIZE) +
+                        " frameIndex=" + frameIndex +
                         " payloadLen=" + payload.length
         );
 
         FileBuffer fb = files.get(h.sequenceNumber);
         if (fb == null) return;
 
-        int frameIndex = h.chunkId / FRAME_SIZE;
         int frameStart = frameIndex * FRAME_SIZE;
         int frameEnd = Math.min(frameStart + FRAME_SIZE, fb.totalChunks);
 
@@ -64,6 +71,7 @@ public class ChunkAssembler {
         });
 
         frame.chunks.put(h.chunkId, payload);
+
         System.out.println(
                 "[FRAME STATUS] seq=" + h.sequenceNumber +
                         " frame=" + frameIndex +
@@ -71,34 +79,18 @@ public class ChunkAssembler {
                         "/" + frame.expected
         );
 
-        if (frame.chunks.size() < frame.expected) return;
+        // Noch nicht voll
+        if (frame.chunks.size() < frame.expected)
+            return;
 
+        // Fehlende Chunks prüfen
         List<Integer> missing = new ArrayList<>();
         for (int i = frameStart; i < frameEnd; i++) {
             if (!frame.chunks.containsKey(i))
                 missing.add(i);
         }
 
-        if (missing.isEmpty()) {
-
-            System.out.println(
-                    "[FRAME COMPLETE] seq=" + h.sequenceNumber +
-                            " frame=" + frameIndex
-            );
-
-            sendAck(h);
-
-            boolean all = allFramesComplete(fb);
-            System.out.println(
-                    "[FILE CHECK] seq=" + h.sequenceNumber +
-                            " allFramesComplete=" + all +
-                            " framesHave=" + fb.frames.size()
-            );
-
-            if (all)
-                writeFile(fb);
-
-        } else {
+        if (!missing.isEmpty()) {
 
             System.out.println(
                     "[FRAME INCOMPLETE] seq=" + h.sequenceNumber +
@@ -107,22 +99,58 @@ public class ChunkAssembler {
             );
 
             sendNoAck(h, missing);
+            return;
+        }
+
+        // ===== FRAME IST VOLLSTÄNDIG =====
+        frame.complete = true;
+
+        System.out.println(
+                "[FRAME COMPLETE] seq=" + h.sequenceNumber +
+                        " frame=" + frameIndex
+        );
+
+        sendAck(h);
+
+        boolean all = allFramesComplete(fb);
+
+        System.out.println(
+                "[FILE CHECK] seq=" + h.sequenceNumber +
+                        " allFramesComplete=" + all +
+                        " framesHave=" + fb.frames.size()
+        );
+
+        if (all) {
+            writeFile(fb);
+            files.remove(h.sequenceNumber); // aufräumen
         }
     }
 
+    // ================= VOLLSTÄNDIGKEIT =================
     private static boolean allFramesComplete(FileBuffer fb) {
-        int frames = (int) Math.ceil(fb.totalChunks / (double) FRAME_SIZE);
-        for (int i = 0; i < frames; i++) {
-            Frame f = fb.frames.get(i);
-            if (f == null || f.chunks.size() != f.expected)
+
+        for (int chunkId = 0; chunkId < fb.totalChunks; chunkId++) {
+            int frameIndex = chunkId / FRAME_SIZE;
+            Frame f = fb.frames.get(frameIndex);
+
+            if (f == null || !f.chunks.containsKey(chunkId)) {
+
+                System.out.println("[MISSING] seq=" + /*seq*/ " chunkId=" + chunkId
+                        + " frameHave=" + (f == null ? 0 : f.chunks.size()) + "/" + (f == null ? -1 : f.expected));
                 return false;
+            }
         }
         return true;
     }
 
+    // ================= ACK / NO_ACK =================
     private static void sendAck(PacketHeader h) {
         NodeContext.socket.sendPacket(
-                PacketFactory.createAck(h.sequenceNumber, h.sourceIp, h.sourcePort & 0xFFFF),
+                PacketFactory.createAck(
+                        h.sequenceNumber,
+                        h.sourceIp,
+                        h.sourcePort & 0xFFFF
+                ),
                 NodeContext.socket.socketAddressForIp(h.sourceIp),
                 h.sourcePort & 0xFFFF
         );
@@ -141,22 +169,34 @@ public class ChunkAssembler {
         );
     }
 
+    // ================= DATEI SCHREIBEN =================
     private static void writeFile(FileBuffer fb) {
+
         try {
-            byte[] out = new byte[fb.frames.values().stream()
-                    .flatMap(f -> f.chunks.values().stream())
-                    .mapToInt(b -> b.length)
-                    .sum()];
+            byte[] out = new byte[
+                    fb.frames.values().stream()
+                            .flatMap(f -> f.chunks.values().stream())
+                            .mapToInt(b -> b.length)
+                            .sum()
+                    ];
 
             int pos = 0;
-            for (int i = 0; i < fb.totalChunks; i++) {
-                Frame f = fb.frames.get(i / FRAME_SIZE);
-                byte[] c = f.chunks.get(i);
+            for (int chunkId = 0; chunkId < fb.totalChunks; chunkId++) {
+                Frame f = fb.frames.get(chunkId / FRAME_SIZE);
+                byte[] c = f.chunks.get(chunkId);
                 System.arraycopy(c, 0, out, pos, c.length);
                 pos += c.length;
             }
 
             Files.write(Paths.get(fb.filename), out);
-        } catch (IOException ignored) {}
+
+            System.out.println(
+                    "[FILE WRITTEN] filename=" + fb.filename +
+                            " bytes=" + out.length
+            );
+
+        } catch (IOException e) {
+            System.err.println("[FILE WRITE ERROR] " + e.getMessage());
+        }
     }
 }
