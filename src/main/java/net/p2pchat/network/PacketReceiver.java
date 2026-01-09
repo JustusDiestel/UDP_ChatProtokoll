@@ -22,28 +22,24 @@ import java.util.Arrays;
 
 public class PacketReceiver {
 
+    private static final int FRAME_SIZE = 128;
     private static final ReceivedHistory receivedHistory = new ReceivedHistory();
 
     public static void handle(DatagramPacket packet) {
 
-        // ===================== UDP-Envelope (DIRECT NEIGHBOR) =====================
         int hopIp = IpUtil.ipToInt(packet.getAddress().getHostAddress());
         int hopPort = packet.getPort();
 
-        // ===================== RAW =====================
-        int len = packet.getLength();
         byte[] raw = Arrays.copyOfRange(
                 packet.getData(),
                 packet.getOffset(),
-                packet.getOffset() + len
+                packet.getOffset() + packet.getLength()
         );
 
         PacketHeader header = PacketHeader.fromBytes(raw);
 
-        // ===================== ORIGINAL HEADER FIELDS =====================
         int senderIp = header.sourceIp;
         int senderPort = header.sourcePort & 0xFFFF;
-        int typeName = header.type;
         int destIp = header.destinationIp;
         int destPort = header.destinationPort & 0xFFFF;
 
@@ -51,114 +47,95 @@ public class PacketReceiver {
         if (raw.length < headerSize + header.payloadLength) return;
 
         byte[] payload = Arrays.copyOfRange(raw, headerSize, headerSize + header.payloadLength);
-
         if (!Arrays.equals(HashUtil.sha256(payload), header.checksum)) return;
 
-        // Neues: gemeinsame Prüfung, ob das Paket für diesen Knoten bestimmt ist,
-        // und kurzes Logging wenn ja.
-        boolean destinedForMe =
+        boolean isForMe =
                 destIp == NodeContext.localIp &&
                         destPort == NodeContext.localPort;
-/**
-        if (destinedForMe) {
-            System.out.println("[RECV] " + typeName
-                    + " von " + IpUtil.intToIp(senderIp) + ":" + senderPort
-                    + " seq=" + header.sequenceNumber
-                    + " len=" + payload.length);
-        }
-**/
-        // ===================== NEIGHBOR MGMT (HOP!) =====================
-        boolean wasAliveBefore = NeighborManager.isAlive(hopIp, hopPort);
 
-        if (header.type == 0x03 || header.type == 0x08) { // HELLO oder HEARTBEAT
+        boolean wasAliveBefore = NeighborManager.isAlive(hopIp, hopPort);
+        if (header.type == 0x03 || header.type == 0x08) {
             NeighborManager.updateOrAdd(hopIp, hopPort);
         }
 
-        // ===================== ACK =====================
-        // ===================== ACK =====================
+        // ================= ACK =================
         if (header.type == 0x01) {
-            if (header.payloadLength != 0) return;
+
+            if (!isForMe) {
+                PacketHeader fwd = header.copy();
+                if (--fwd.ttl <= 0) return;
+                fwd.computeChecksum(payload);
+
+                Route r = RoutingTable.getRoute(destIp, destPort);
+                if (r == null) return;
+
+                NodeContext.socket.sendPacket(
+                        new Packet(fwd, payload),
+                        NodeContext.socket.socketAddressForIp(r.nextHopIp),
+                        r.nextHopPort
+                );
+                return;
+            }
 
             int seq = header.sequenceNumber;
 
-            System.out.println("[RECV ACK] seq=" + seq
-                    + " fromHop=" + IpUtil.intToIp(hopIp) + ":" + hopPort
-                    + " src=" + IpUtil.intToIp(senderIp) + ":" + senderPort
-                    + " dst=" + IpUtil.intToIp(destIp) + ":" + destPort);
-
-            // 1) ZUERST: ist das ACK für ein SINGLE (z.B. FILE_INFO)?
-            if (PendingPackets.getPending().containsKey((((long) seq) << 32) | 0xffffffffL)) { // key(seq,-1)
+            if (PendingPackets.getPending()
+                    .containsKey((((long) seq) << 32) | 0xffffffffL)) {
                 PendingPackets.clearSingle(seq);
                 return;
             }
 
-            // 2) SONST: genau EIN Frame bestätigen (Stop-and-Wait)
-            PendingPackets.Pending oldest = null;
             for (PendingPackets.Pending p : PendingPackets.getPending().values()) {
-                if (!p.isFrame) continue;
-                if (p.sequenceNumber != seq) continue;
-
-                if (oldest == null || p.frameIndex < oldest.frameIndex) {
-                    oldest = p;
+                if (p.isFrame && p.sequenceNumber == seq) {
+                    PendingPackets.clearFrame(seq, p.frameIndex);
+                    break;
                 }
             }
-
-            if (oldest != null) {
-                PendingPackets.clearFrame(seq, oldest.frameIndex);
-            }
-
-            return;
+            return; // ✅ NICHT WEITERLEITEN
         }
 
-        // ===================== NO_ACK =====================
+        // ================= NO_ACK =================
         if (header.type == 0x02) {
+
+            if (!isForMe) {
+                PacketHeader fwd = header.copy();
+                if (--fwd.ttl <= 0) return;
+                fwd.computeChecksum(payload);
+
+                Route r = RoutingTable.getRoute(destIp, destPort);
+                if (r == null) return;
+
+                NodeContext.socket.sendPacket(
+                        new Packet(fwd, payload),
+                        NodeContext.socket.socketAddressForIp(r.nextHopIp),
+                        r.nextHopPort
+                );
+                return;
+            }
 
             if (payload.length < 6) return;
 
             ByteBuffer buf = ByteBuffer.wrap(payload);
             int seq = buf.getInt();
             int count = buf.getShort() & 0xFFFF;
-
-            if (buf.remaining() < count * 4) return;
+            if (count == 0 || buf.remaining() < count * 4) return;
 
             int[] missing = new int[count];
             for (int i = 0; i < count; i++) missing[i] = buf.getInt();
 
-            int frameIndex = (count > 0) ? (missing[0] / 128) : 0;
-
+            int frameIndex = missing[0] / FRAME_SIZE;
             PendingPackets.updateMissingChunks(seq, frameIndex, missing);
             FileResender.resendChunks(seq, frameIndex, missing);
-            System.out.println("[NO_ACK] seq=" + seq + " frameIndex=" + frameIndex + " missingCount=" + count);
             return;
         }
 
-        // ===================== HELLO =====================
-        if (header.type == 0x03) {
-            if (header.payloadLength != 0) return;
-            RoutingTable.ensureDirectNeighbor(hopIp, hopPort);
-            if (!wasAliveBefore) RoutingManager.broadcastRoutingUpdate();
-            return;
-        }
-
-        // ===================== GOODBYE =====================
-        if (header.type == 0x04) {
-            if (header.payloadLength != 0) return;
-            NeighborManager.markDead(hopIp, hopPort);
-            boolean changed = RoutingTable.removeVia(hopIp, hopPort);
-            if (changed) RoutingManager.broadcastRoutingUpdate();
-            return;
-        }
-
-        // ===================== MSG =====================
+        // ================= MSG =================
         if (header.type == 0x05) {
-
-            boolean isForMe =
-                    destIp == NodeContext.localIp &&
-                            destPort == NodeContext.localPort;
 
             if (!isForMe) {
                 PacketHeader fwd = header.copy();
                 if (--fwd.ttl <= 0) return;
+                fwd.computeChecksum(payload);
 
                 Route r = RoutingTable.getRoute(destIp, destPort);
                 if (r == null) return;
@@ -172,44 +149,26 @@ public class PacketReceiver {
             }
 
             if (receivedHistory.isDuplicate(senderIp, senderPort, header.sequenceNumber)) {
-                Packet ack = PacketFactory.createAck(
-                        header.sequenceNumber,
-                        senderIp,
-                        senderPort
-                );
-                NodeContext.socket.sendPacket(ack, packet.getAddress(), senderPort);
+                Packet ack = PacketFactory.createAck(header.sequenceNumber, senderIp, senderPort);
+                NodeContext.socket.sendPacket(ack, packet.getAddress(), hopPort);
                 return;
             }
 
             String msg = new String(payload, StandardCharsets.UTF_8);
-            System.out.println("MSG von "
-                    + IpUtil.intToIp(senderIp) + ":" + senderPort
-                    + " → " + msg);
+            System.out.println("MSG von " + IpUtil.intToIp(senderIp) + ":" + senderPort + " → " + msg);
 
-            Packet ack = PacketFactory.createAck(
-                    header.sequenceNumber,
-                    senderIp,
-                    senderPort
-            );
-            NodeContext.socket.sendPacket(ack, packet.getAddress(), senderPort);
+            Packet ack = PacketFactory.createAck(header.sequenceNumber, senderIp, senderPort);
+            NodeContext.socket.sendPacket(ack, packet.getAddress(), hopPort);
             return;
         }
 
-        // ===================== FILE_CHUNK =====================
+        // ================= FILE_CHUNK =================
         if (header.type == 0x06) {
-            System.out.println(
-                    "[RECV FILE_CHUNK] seq=" + header.sequenceNumber +
-                            " chunkId=" + header.chunkId +
-                            " from=" + IpUtil.intToIp(senderIp) + ":" + senderPort
-            );
-
-            boolean isForMe =
-                    destIp == NodeContext.localIp &&
-                            destPort == NodeContext.localPort;
 
             if (!isForMe) {
                 PacketHeader fwd = header.copy();
                 if (--fwd.ttl <= 0) return;
+                fwd.computeChecksum(payload);
 
                 Route r = RoutingTable.getRoute(destIp, destPort);
                 if (r == null) return;
@@ -226,16 +185,13 @@ public class PacketReceiver {
             return;
         }
 
-        // ===================== FILE_INFO =====================
+        // ================= FILE_INFO =================
         if (header.type == 0x07) {
-
-            boolean isForMe =
-                    destIp == NodeContext.localIp &&
-                            destPort == NodeContext.localPort;
 
             if (!isForMe) {
                 PacketHeader fwd = header.copy();
                 if (--fwd.ttl <= 0) return;
+                fwd.computeChecksum(payload);
 
                 Route r = RoutingTable.getRoute(destIp, destPort);
                 if (r == null) return;
@@ -251,16 +207,12 @@ public class PacketReceiver {
             String filename = new String(payload, StandardCharsets.UTF_8);
             ChunkAssembler.setFileInfo(header, filename);
 
-            Packet ack = PacketFactory.createAck(
-                    header.sequenceNumber,
-                    senderIp,
-                    senderPort
-            );
-            NodeContext.socket.sendPacket(ack, packet.getAddress(), senderPort);
+            Packet ack = PacketFactory.createAck(header.sequenceNumber, senderIp, senderPort);
+            NodeContext.socket.sendPacket(ack, packet.getAddress(), hopPort);
             return;
         }
 
-        // ===================== HEARTBEAT =====================
+        // ================= HEARTBEAT =================
         if (header.type == 0x08) {
             if (header.payloadLength != 0) return;
             RoutingTable.ensureDirectNeighbor(hopIp, hopPort);
@@ -268,18 +220,14 @@ public class PacketReceiver {
             return;
         }
 
-        // ===================== ROUTING_UPDATE =====================
+        // ================= ROUTING_UPDATE =================
         if (header.type == 0x09) {
 
             if (payload.length < 2) return;
-
-            // Routing Updates nur von bekannten Nachbarn akzeptieren
             if (!NeighborManager.isAlive(hopIp, hopPort)) return;
 
-            boolean newNeighbor = false;
             ByteBuffer buf = ByteBuffer.wrap(payload);
             int count = buf.getShort() & 0xFFFF;
-
             boolean changed = false;
 
             for (int i = 0; i < count; i++) {
@@ -292,18 +240,12 @@ public class PacketReceiver {
                 if (dip == NodeContext.localIp && dport == NodeContext.localPort)
                     continue;
 
-                if (RoutingTable.learnFromUpdate(
-                        hopIp, hopPort,   // ← NEXT HOP!
-                        dip, dport,
-                        recvDist
-                )) {
+                if (RoutingTable.learnFromUpdate(hopIp, hopPort, dip, dport, recvDist)) {
                     changed = true;
                 }
             }
-            if (changed) {
-                RoutingManager.broadcastRoutingUpdate();
-            }
+
+            if (changed) RoutingManager.broadcastRoutingUpdate();
         }
     }
 }
-

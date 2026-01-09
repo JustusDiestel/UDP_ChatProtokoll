@@ -76,8 +76,9 @@ public class PendingPackets {
 
 
         long k = key(sequenceNumber, frameIndex);
-        pending.put(k, new Pending(frameChunks, sequenceNumber, frameIndex, destIp, destPort));
-
+        if (!pending.containsKey(k)) {
+            pending.put(k, new Pending(frameChunks, sequenceNumber, frameIndex, destIp, destPort));
+        }
         System.out.println(
                 "[PENDING ADD][FRAME] seq=" + sequenceNumber
                         + " frame=" + frameIndex

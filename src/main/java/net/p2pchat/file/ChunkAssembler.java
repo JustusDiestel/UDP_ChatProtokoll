@@ -70,6 +70,17 @@ public class ChunkAssembler {
             return f;
         });
 
+// ===== FIX 1: Frame-Duplikate =====
+        if (frame.complete) {
+            sendAck(h);
+            return;
+        }
+
+// ===== FIX 2: Chunk-Duplikate =====
+        if (frame.chunks.containsKey(h.chunkId)) {
+            return;
+        }
+
         frame.chunks.put(h.chunkId, payload);
 
         System.out.println(
@@ -145,27 +156,43 @@ public class ChunkAssembler {
 
     // ================= ACK / NO_ACK =================
     private static void sendAck(PacketHeader h) {
-        NodeContext.socket.sendPacket(
-                PacketFactory.createAck(
-                        h.sequenceNumber,
-                        h.sourceIp,
-                        h.sourcePort & 0xFFFF
-                ),
-                NodeContext.socket.socketAddressForIp(h.sourceIp),
+        var r = net.p2pchat.routing.RoutingTable.getRoute(h.sourceIp, h.sourcePort & 0xFFFF);
+        if (r == null) return;
+
+        PacketFactory.createAck(
+                h.sequenceNumber,
+                h.sourceIp,
                 h.sourcePort & 0xFFFF
+        );
+
+        var ack = PacketFactory.createAck(
+                h.sequenceNumber,
+                h.sourceIp,
+                h.sourcePort & 0xFFFF
+        );
+
+        NodeContext.socket.sendPacket(
+                ack,
+                NodeContext.socket.socketAddressForIp(r.nextHopIp),
+                r.nextHopPort
         );
     }
 
     private static void sendNoAck(PacketHeader h, List<Integer> missing) {
+        var r = net.p2pchat.routing.RoutingTable.getRoute(h.sourceIp, h.sourcePort & 0xFFFF);
+        if (r == null) return;
+
+        var noAck = PacketFactory.createNoAck(
+                h.sequenceNumber,
+                h.sourceIp,
+                h.sourcePort & 0xFFFF,
+                missing.stream().mapToInt(i -> i).toArray()
+        );
+
         NodeContext.socket.sendPacket(
-                PacketFactory.createNoAck(
-                        h.sequenceNumber,
-                        h.sourceIp,
-                        h.sourcePort & 0xFFFF,
-                        missing.stream().mapToInt(i -> i).toArray()
-                ),
-                NodeContext.socket.socketAddressForIp(h.sourceIp),
-                h.sourcePort & 0xFFFF
+                noAck,
+                NodeContext.socket.socketAddressForIp(r.nextHopIp),
+                r.nextHopPort
         );
     }
 
