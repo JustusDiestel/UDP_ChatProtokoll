@@ -33,6 +33,7 @@ public class PacketFactory {
 
     public static Packet createAck(int seq, int destIp, int destPort) {
         byte[] payload = new byte[0];
+        System.out.println("Creating ACK packet with seq " + seq + "to " + destIp + ":" + destPort);
         PacketHeader h = base((byte)0x01, seq, destIp, destPort, 0);
         h.computeChecksum(payload);
         return new Packet(h, payload);
