@@ -24,6 +24,7 @@ public class ChunkAssembler {
         String filename;
         int totalChunks;
         Map<Integer, Frame> frames = new ConcurrentHashMap<>();
+        int expectedFrameIndex = 0;
     }
 
     private static final Map<Integer, FileBuffer> files = new ConcurrentHashMap<>();
@@ -67,6 +68,16 @@ public class ChunkAssembler {
             );
             return;
         }
+        // ===== STOP-AND-WAIT FILTER =====
+        if (frameIndex < fb.expectedFrameIndex) {
+            sendAck(h);
+            logAckAndExpectation(h, fb, "DUPLICATE_OLD_FRAME");
+            return;
+        }
+        if (frameIndex > fb.expectedFrameIndex) {
+            // zukünftiges Frame → ignorieren
+            return;
+        }
 
         int frameStart = frameIndex * FRAME_SIZE;
         int frameEnd = Math.min(frameStart + FRAME_SIZE, fb.totalChunks);
@@ -84,6 +95,7 @@ public class ChunkAssembler {
                             " frame=" + frameIndex + " → resending ACK"
             );
             sendAck(h);
+            logAckAndExpectation(h, fb, "DUPLICATE_COMPLETE_FRAME");
             return;
         }
 
@@ -141,6 +153,9 @@ public class ChunkAssembler {
         );
 
         sendAck(h);
+        fb.expectedFrameIndex++;   // ✅ EINZIGE Mutation
+
+        logAckAndExpectation(h, fb, "FRAME_COMPLETE");
 
         // ===== Prüfen ob ALLE Frames fertig sind =====
         boolean allComplete = allFramesComplete(fb);
@@ -282,5 +297,13 @@ public class ChunkAssembler {
         } catch (IOException e) {
             System.err.println("[FILE WRITE ERROR] " + e.getMessage());
         }
+    }
+
+    private static void logAckAndExpectation(PacketHeader h, FileBuffer fb, String reason) {
+        System.out.println(
+                "[ACK SENT] seq=" + h.sequenceNumber +
+                        " reason=" + reason +
+                        " nextExpectedFrame=" + fb.expectedFrameIndex
+        );
     }
 }

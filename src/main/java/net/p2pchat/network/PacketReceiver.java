@@ -226,6 +226,11 @@ public class PacketReceiver {
 
             Packet ack = PacketFactory.createAck(header.sequenceNumber, senderIp, senderPort);
             NodeContext.socket.sendPacket(ack, packet.getAddress(), hopPort);
+
+            System.out.println(
+                    "[ACK SENT] seq=" + header.sequenceNumber +
+                            " reason=FILE_INFO_ACK nextExpectedFrame=0"
+            );
             return;
         }
 
