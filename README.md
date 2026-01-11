@@ -37,3 +37,14 @@ Frage
 # checksum
 	•	Checksum schützt nur Payload
 	•	TTL wird nicht gehasht
+
+
+| Bereich | Inhalt | Geschätzte Kosten |
+|---|---|---|
+| **Personal (12–18 Monate)** | Backend/Fullstack (2×), Frontend (1×), AI/ML (1×), UX/UI (Teilzeit), Produkt/Tech Lead | 350.000 – 600.000 € |
+| **Infrastruktur & Betrieb** | Cloud, Datenbanken, Monitoring, Security, CI/CD | 40.000 – 80.000 € |
+| **Externe Services & APIs** | Alpaca API, News-APIs, LLM-Nutzung | 30.000 – 70.000 € |
+| **Recht & Compliance** | AGB, Datenschutz, Finanzrecht, MiFID-II-Vorbereitung | 30.000 – 60.000 € |
+| **Go-to-Market** | Branding, Website, Pilotnutzer, erstes Marketing | 20.000 – 50.000 € |
+| **Gesamt (Minimal konkurrenzfähig)** | Early-Market-Produkt | **≈ 500.000 €** |
+| **Gesamt (Solide konkurrenzfähig)** | Skalierbar & investorenreif | **≈ 750.000 – 1.000.000 €** |
